@@ -1,0 +1,17 @@
+# SegResNet head thresholds. Probability channels follow CHANNEL_ORDER: ET, TC, WT.
+thresholds:
+  ET: 0.5
+  TC: 0.5
+  WT: 0.5
+
+# Minimum 26-connected component size, in voxels (mm^3 when the volume is 1 mm isotropic).
+min_voxels:
+  ET: 50
+  TC: 150
+  WT: 300
+
+# If the remaining enhancing tumor is smaller than this, drop it. Those voxels stay NCR.
+et_min_voxels: 100
+
+# binary_closing iterations on the nonzero-voxel brain mask before hole filling.
+brain_closing_iterations: 2

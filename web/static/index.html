@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>BraTS viewer</title>
+  <link rel="stylesheet" href="/static/viewer.css">
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://unpkg.com/three@0.169.0/build/three.module.js",
+        "three/addons/": "https://unpkg.com/three@0.169.0/examples/jsm/"
+      }
+    }
+  </script>
+</head>
+<body>
+  <section id="upload-screen">
+    <form id="upload-form">
+      <h1>Open a scan</h1>
+      <p>Four BraTS NIfTIs. A segmentation file is optional.</p>
+      <label>FLAIR (t2f) <input name="t2f" type="file" accept=".nii,.nii.gz" required></label>
+      <label>T1 (t1n) <input name="t1n" type="file" accept=".nii,.nii.gz" required></label>
+      <label>T1c <input name="t1c" type="file" accept=".nii,.nii.gz" required></label>
+      <label>T2 (t2w) <input name="t2w" type="file" accept=".nii,.nii.gz" required></label>
+      <label>Segmentation <input name="seg" type="file" accept=".nii,.nii.gz"></label>
+      <label>SynthSeg <input name="synthseg" type="file" accept=".nii,.nii.gz"></label>
+      <label class="check"><input name="anatomy" type="checkbox"> Anatomy</label>
+      <label class="check"><input name="tracts" type="checkbox"> Tracts</label>
+      <button type="submit">Upload and reconstruct</button>
+      <p id="upload-status" role="status"></p>
+    </form>
+  </section>
+
+  <div id="viewer" hidden>
+    <canvas id="view"></canvas>
+    <aside id="panel">
+      <h1 id="case-title">Case</h1>
+      <p id="tract-note" hidden>Tracts are atlas-estimated, not patient tractography.</p>
+      <div id="groups"></div>
+      <section>
+        <h2>MRI slice</h2>
+        <label>Sequence
+          <select id="modality">
+            <option value="flair">FLAIR</option>
+            <option value="t1c">T1c</option>
+          </select>
+        </label>
+        <div id="clip-controls"></div>
+      </section>
+      <section>
+        <h2>Tract proximity</h2>
+        <div id="proximity"></div>
+      </section>
+    </aside>
+    <div id="tooltip" hidden></div>
+  </div>
+  <script type="module" src="/static/viewer.js"></script>
+</body>
+</html>

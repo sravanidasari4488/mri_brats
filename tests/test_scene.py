@@ -118,6 +118,9 @@ def test_build_scene_exports_named_nodes_and_original_space():
 
         saved = nib.load(out / "pred_seg.nii.gz")
         assert np.allclose(saved.affine, affine)
+        anatomy_seg = nib.load(out / "anatomy_seg.nii.gz")
+        assert anatomy_seg.shape[:3] == saved.shape[:3]
+        assert np.allclose(anatomy_seg.affine, saved.affine)
         roundtrip = np.rint(nib.as_closest_canonical(saved).get_fdata()).astype(np.int16)
         pred = nib.load(out / "pred_seg.nii.gz")
         native = np.rint(pred.get_fdata()).astype(np.int16)

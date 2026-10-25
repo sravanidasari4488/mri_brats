@@ -9,17 +9,26 @@ network again.
 Each ``.npz`` holds ``probs`` as float16 in ``CHANNEL_ORDER`` (ET, TC, WT)
 plus the label on the same RAS 1 mm grid.
 
+Re-running the same command resumes. Each case is written into ``--out-dir``
+as soon as it finishes, so a Colab runtime that disconnects keeps every
+completed file on Drive. A case whose ``.npz`` already opens is skipped.
+A truncated file is computed again.
+
 Example:
     python scripts/cache_probs.py
     python scripts/cache_probs.py --dry-run
+    python scripts/cache_probs.py --out-dir "/content/drive/MyDrive/brats/val_probs"
 """
 
 from __future__ import annotations
 
 import argparse
+import io
 import json
+import os
 import random
 import sys
+import zipfile
 from pathlib import Path
 
 import numpy as np
@@ -116,6 +125,43 @@ def _spacing_mm(image) -> np.ndarray:
     return np.asarray(voxel_sizes(np.asarray(affine, dtype=np.float64)), dtype=np.float64)
 
 
+def _cache_exists(path: Path) -> bool:
+    """True when ``path`` is a finished cache that can be reloaded."""
+    if not path.is_file() or path.stat().st_size == 0:
+        return False
+    try:
+        with np.load(path, allow_pickle=False) as data:
+            return "probs" in data.files and "label" in data.files
+    except (OSError, ValueError, zipfile.BadZipFile):
+        return False
+
+
+def _write_npz(out_path: Path, **arrays) -> None:
+    """Write one case into ``out_path``'s directory as soon as it is finished.
+
+    The archive is built in memory, flushed to a sibling ``.partial`` file in
+    the output directory, then renamed to the ``.npz``. The final name appears
+    only after the bytes are on disk, so a killed Colab run cannot skip a
+    half-written cache on the next start.
+    """
+    buffer = io.BytesIO()
+    np.savez_compressed(buffer, **arrays)
+    payload = buffer.getvalue()
+    partial = out_path.with_name(out_path.name + ".partial")
+    with partial.open("wb") as handle:
+        handle.write(payload)
+        handle.flush()
+        try:
+            os.fsync(handle.fileno())
+        except OSError:
+            pass
+    try:
+        partial.replace(out_path)
+    except OSError:
+        out_path.write_bytes(payload)
+        partial.unlink(missing_ok=True)
+
+
 def _load_case(case_dir: Path, transform: Compose) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     batch = transform(
         {
@@ -170,22 +216,37 @@ def main() -> None:
     }
     (args.out_dir / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
 
+    total = len(selected)
+    pending: list[tuple[int, Path]] = []
+    skipped = 0
+    for index, case_dir in enumerate(selected, start=1):
+        out_path = args.out_dir / f"{case_dir.name}.npz"
+        if _cache_exists(out_path):
+            skipped += 1
+            print(f"[{index}/{total}] skip {case_dir.name}", flush=True)
+            continue
+        if out_path.is_file():
+            print(f"[{index}/{total}] {case_dir.name} unreadable, recomputing", flush=True)
+        pending.append((index, case_dir))
+    print(f"cached {skipped}/{total}, remaining {len(pending)}", flush=True)
+    if not pending:
+        print(f"wrote {args.out_dir}", flush=True)
+        return
+
     device = default_device()
     print(f"device={device} roi={ROI_SIZE}", flush=True)
     model = load_model(args.checkpoint, device)
     transform = _training_transform()
-    for index, case_dir in enumerate(selected, start=1):
+    written = 0
+    for index, case_dir in pending:
         out_path = args.out_dir / f"{case_dir.name}.npz"
-        if out_path.is_file():
-            print(f"[{index}/{len(selected)}] skip {case_dir.name}", flush=True)
-            continue
-        print(f"[{index}/{len(selected)}] {case_dir.name}", flush=True)
+        print(f"[{index}/{total}] {case_dir.name}", flush=True)
         image, label, spacing = _load_case(case_dir, transform)
         probs = predict_probs(model, image, ROI_SIZE, tta=True)
         if probs.shape[1:] != label.shape:
             raise RuntimeError(f"{case_dir.name}: probs {probs.shape} vs label {label.shape}")
         brain = brain_mask_from_image(image).astype(np.uint8)
-        np.savez_compressed(
+        _write_npz(
             out_path,
             probs=np.asarray(probs, dtype=np.float16),
             label=label,
@@ -194,7 +255,9 @@ def main() -> None:
             channel_order=np.array(CHANNEL_ORDER),
             case_id=np.array(case_dir.name),
         )
-    print(f"wrote {args.out_dir}", flush=True)
+        written += 1
+        print(f"[{index}/{total}] saved {out_path.name}", flush=True)
+    print(f"wrote {written}, skipped {skipped}, dir {args.out_dir}", flush=True)
 
 
 if __name__ == "__main__":

@@ -4,14 +4,17 @@ BraTS has no diffusion MRI. These meshes are expected locations from the
 JHU white-matter tractography atlas, not patient tractography. Every tract
 object is stamped ``source="atlas-estimated"``.
 
-The MNI template and the tract maps are never downloaded. Missing files raise
-``AtlasNotFoundError`` and point at ``docs/ATLAS_SETUP.md``.
+The MNI template and the tract maps are never downloaded. Missing required
+files raise ``AtlasNotFoundError`` and point at ``docs/ATLAS_SETUP.md``.
+Optic radiation is not in the JHU 4D atlas; a missing file is skipped with a
+warning.
 """
 
 from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import shutil
 import tempfile
 from dataclasses import dataclass
@@ -24,6 +27,8 @@ from scipy.spatial import cKDTree
 
 from recon.mesh import mesh_from_mask
 from recon.postprocess import CONN
+
+logger = logging.getLogger(__name__)
 
 SOURCE = "atlas-estimated"
 DEFAULT_THRESHOLD = 0.25
@@ -47,6 +52,8 @@ JHU_PROB_VOLUMES = {
 
 _TEMPLATE_NAMES = ("MNI152_T1_1mm.nii.gz", "MNI152_T1_1mm.nii")
 _PROB_4D_NAMES = ("JHU-ICBM-tracts-prob-2mm.nii.gz", "JHU-ICBM-tracts-prob-2mm.nii")
+# Not a volume in JHU-ICBM-tracts-prob-2mm. Included only when a 3D file is present.
+OPTIONAL_TRACTS = frozenset({"optic_radiation_L", "optic_radiation_R"})
 
 
 class AtlasNotFoundError(FileNotFoundError):
@@ -118,11 +125,21 @@ def resolve_atlas(atlas_dir: Path | None = None) -> tuple[Path, dict]:
             sources[name] = individual
         elif volumes and prob_4d is not None:
             sources[name] = (prob_4d, volumes)
+        elif name in OPTIONAL_TRACTS:
+            _warn_skipped_tract(name, jhu_dir / f"{name}.nii.gz")
         else:
             missing.append(jhu_dir / f"{name}.nii.gz")
     if missing:
         raise AtlasNotFoundError(_missing_message(root, prob_4d, missing), missing)
     return template, sources
+
+
+def _warn_skipped_tract(name: str, path: Path) -> None:
+    logger.warning(
+        "Skipping %s: %s is missing. Optic radiation is optional and is not a volume in JHU-ICBM-tracts-prob-2mm.",
+        name,
+        path,
+    )
 
 
 def _missing_message(root: Path, prob_4d: Path | None, missing: list[Path]) -> str:
@@ -133,8 +150,6 @@ def _missing_message(root: Path, prob_4d: Path | None, missing: list[Path]) -> s
         "Place the MNI152 1mm T1 and the JHU tract probability maps as described in docs/ATLAS_SETUP.md.\n"
         f"Atlas directory: {root}\n"
         f"4D JHU tractography atlas: {four_d}.\n"
-        "Optic radiation is not a volume in JHU-ICBM-tracts-prob-2mm, so optic_radiation_L/R.nii.gz "
-        "are required even when that 4D file is present.\n"
         f"Missing:\n{lines}"
     )
 
@@ -223,6 +238,27 @@ def _store_transforms(cache_case: Path, expected: dict, transforms: list[str]) -
     return copied
 
 
+def patient_mni_transforms(t1_path, label, template, *, cache_dir=None, case_id=None, ants=None, fixed=None):
+    """Forward MNI-to-patient transforms, reusing the tract-registration cache.
+
+    The cache key is the case id, the resolved template path, and the tumor
+    label. A hit returns the stored ANTs files. A miss runs the same SyN
+    registration as ``warp_atlas_tracts`` and writes the cache.
+    """
+    if ants is None:
+        ants = _import_ants()
+    cache_root = Path(cache_dir) if cache_dir is not None else default_cache_dir()
+    case = _case_id_from_path(t1_path, case_id)
+    cache_case, expected = _cache_paths(cache_root, case, template, label)
+    cached = _load_cached_transforms(cache_case, expected)
+    if cached is not None:
+        return cached
+    if fixed is None:
+        fixed = ants.image_read(str(t1_path))
+    _tumor_wt(label, fixed.shape)
+    return _store_transforms(cache_case, expected, _register(ants, fixed, template, label))
+
+
 def _register(ants, fixed, template_path, label):
     tumor = _tumor_wt(label, fixed.shape)
     margin = ndimage.binary_dilation(tumor, structure=CONN, iterations=TUMOR_MARGIN_VOXELS)
@@ -263,6 +299,21 @@ def to_probability(values) -> np.ndarray:
     if peak > 1.5:
         prob = prob / 100.0
     return prob
+
+
+def _drop_missing_sources(sources: dict) -> tuple[dict, list[Path]]:
+    """Drop optional tracts whose files are absent. Other missing paths are returned."""
+    kept = {}
+    missing = []
+    for name, source in sources.items():
+        path = Path(source[0] if isinstance(source, tuple) else source)
+        if path.is_file():
+            kept[name] = source
+        elif name in OPTIONAL_TRACTS:
+            _warn_skipped_tract(name, path)
+        else:
+            missing.append(path)
+    return kept, missing
 
 
 def _require_file(path: Path, kind: str) -> None:
@@ -309,8 +360,7 @@ def warp_atlas_tracts(
 
     _require_file(t1_path, "Patient T1")
     _require_file(template, "MNI152 1mm T1 template")
-    missing = [Path(source[0] if isinstance(source, tuple) else source) for source in sources.values()]
-    missing = [path for path in missing if not path.is_file()]
+    sources, missing = _drop_missing_sources(sources)
     if missing:
         raise AtlasNotFoundError(_missing_message(default_atlas_dir(), None, missing), missing)
 
@@ -319,10 +369,9 @@ def warp_atlas_tracts(
     _tumor_wt(label, fixed.shape)
     cache_root = Path(out_dir) if out_dir is not None else default_cache_dir()
     case = _case_id_from_path(t1_path, case_id)
-    cache_case, expected = _cache_paths(cache_root, case, template, label)
-    transforms = _load_cached_transforms(cache_case, expected)
-    if transforms is None:
-        transforms = _store_transforms(cache_case, expected, _register(ants, fixed, template, label))
+    transforms = patient_mni_transforms(
+        t1_path, label, template, cache_dir=cache_root, case_id=case, ants=ants, fixed=fixed
+    )
 
     affine = affine_from_ants(fixed)
     tracts = {}

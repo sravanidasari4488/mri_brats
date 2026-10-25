@@ -1,5 +1,6 @@
 """Atlas path checks, tract metadata, cache reuse, and tumor proximity."""
 
+import logging
 import sys
 import tempfile
 from pathlib import Path
@@ -53,24 +54,39 @@ def test_missing_atlas_names_the_setup_doc():
         assert "docs/ATLAS_SETUP.md" in text
         assert "does not download" in text
         assert "MNI152_T1_1mm.nii.gz" in text
-        assert "optic_radiation_L.nii.gz" in text
-        assert "optic_radiation_R.nii.gz" in text
+        assert "optic_radiation_L.nii.gz" not in text
+        assert "optic_radiation_R.nii.gz" not in text
 
 
-def test_four_d_atlas_still_requires_optic_radiation():
+def test_missing_optic_radiation_is_skipped_with_a_warning():
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
         _write_nifti(root / "MNI152_T1_1mm.nii.gz", np.zeros((4, 4, 4), dtype=np.float32))
         _write_nifti(root / "jhu" / "JHU-ICBM-tracts-prob-2mm.nii.gz", np.zeros((4, 4, 4, 20), dtype=np.float32))
+        _write_nifti(root / "jhu" / "optic_radiation_L.nii.gz", np.ones((4, 4, 4), dtype=np.float32))
+        messages = []
+
+        class _Capture(logging.Handler):
+            def emit(self, record):
+                messages.append(record.getMessage())
+
+        log = logging.getLogger("recon.tracts")
+        handler = _Capture()
+        log.addHandler(handler)
+        log.setLevel(logging.WARNING)
         try:
-            resolve_atlas(root)
-            raise AssertionError("expected AtlasNotFoundError")
-        except AtlasNotFoundError as exc:
-            missing = [path.name for path in exc.missing]
-        assert "optic_radiation_L.nii.gz" in missing
-        assert "optic_radiation_R.nii.gz" in missing
-        assert "corticospinal_tract_L.nii.gz" not in missing
-        assert "MNI152_T1_1mm.nii.gz" not in missing
+            template, sources = resolve_atlas(root)
+        finally:
+            log.removeHandler(handler)
+        assert template.name == "MNI152_T1_1mm.nii.gz"
+        assert "optic_radiation_L" in sources
+        assert "optic_radiation_R" not in sources
+        assert "corticospinal_tract_L" in sources
+        logged = " ".join(messages)
+        assert "Skipping optic_radiation_R" in logged
+        assert "optic_radiation_R.nii.gz" in logged
+        assert "optional" in logged
+        assert "Skipping optic_radiation_L" not in logged
 
 
 def test_percent_maps_use_a_probability_threshold():
@@ -185,7 +201,7 @@ def test_warp_caches_syn_transforms_and_stamps_meshes():
 
 if __name__ == "__main__":
     test_missing_atlas_names_the_setup_doc()
-    test_four_d_atlas_still_requires_optic_radiation()
+    test_missing_optic_radiation_is_skipped_with_a_warning()
     test_percent_maps_use_a_probability_threshold()
     test_tract_metadata_and_proximity_in_millimeters()
     test_warp_caches_syn_transforms_and_stamps_meshes()

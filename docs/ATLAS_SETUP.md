@@ -7,9 +7,9 @@
 ```
 atlases/MNI152_T1_1mm.nii.gz
 atlases/jhu/JHU-ICBM-tracts-prob-2mm.nii.gz
-atlases/jhu/optic_radiation_L.nii.gz
-atlases/jhu/optic_radiation_R.nii.gz
 ```
+
+Optic radiation is optional. If `atlases/jhu/optic_radiation_L.nii.gz` or `optic_radiation_R.nii.gz` is missing, that tract is skipped and a warning is logged.
 
 The template is FSL's 1 mm MNI152 T1:
 
@@ -46,7 +46,7 @@ atlases/jhu/optic_radiation_L.nii.gz
 atlases/jhu/optic_radiation_R.nii.gz
 ```
 
-These two files are required even when the 4D tractography atlas is present.
+Either file may be omitted. The missing hemisphere is skipped with a warning, and the tracts that come from the 4D atlas are still warped.
 
 ## Individual volumes instead of the 4D file
 
@@ -80,3 +80,20 @@ SyN registers the MNI152 1 mm T1 to the patient T1. The cost-function mask is th
 Maps whose peak is above 1.5 are treated as percent (0–100) and divided by 100. Voxels at or above the probability threshold (default 0.25, i.e. 25%) are meshed. Each tract object has `source="atlas-estimated"`.
 
 Transforms are cached in `caches/tract_transforms/<case_id>/`. A later call for the same case reuses them until the template path or the tumor label changes.
+
+## MNI structural atlas (lobes)
+
+DIPY's PyTorch SynthSeg port does not emit Desikan-Killiany cortex. `parcellate_case` keeps the SynthSeg subcortical labels and warps the FSL MNI structural atlas for the five lobes. It reuses the transforms above. This project does not download the atlas.
+
+```
+atlases/MNI152_T1_1mm.nii.gz
+atlases/MNI/MNI-maxprob-thr25-1mm.nii.gz
+```
+
+The summary image is FSL's 1 mm max-probability MNI structural atlas (threshold 25):
+
+```
+$FSLDIR/data/atlases/MNI/MNI-maxprob-thr25-1mm.nii.gz
+```
+
+Label values in that file are the XML index plus one: 3 frontal, 4 insula, 5 occipital, 6 parietal, 8 temporal. Those lobes replace SynthSeg cortex (labels 3 and 42). Subcortical SynthSeg labels are left as they are. The warp uses nearest-neighbour interpolation.

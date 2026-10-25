@@ -18,7 +18,7 @@ import numpy as np
 import trimesh
 from nibabel.orientations import apply_orientation, io_orientation, ornt_transform
 
-from recon.anatomy import ANATOMY_COLORS
+from recon.anatomy import ANATOMY_COLORS, add_anatomy_meshes
 from recon.evaluate import check_mesh_volume
 from recon.mesh import check_mesh, mesh_from_mask, region_shells
 
@@ -254,6 +254,7 @@ def build_scene(
         structures[name] = _structure_record(name, mesh, mask, affine, color, "model")
 
     removed = {}
+    anatomy_removed = {}
     if anatomy:
         color = SCENE_COLORS["brain"]
         brain_mesh = None
@@ -270,10 +271,31 @@ def build_scene(
             found = _find_synthseg(case_dir, synthseg)
             if found is not None:
                 parc = _load_synthseg(found, label.shape)
-        if parc is not None:
-            from recon.anatomy import cleaned_structure_masks
+        anatomy_removed = {}
+        if parc is None:
+            from recon.anatomy import parcellate_case
 
-            masks, removed = cleaned_structure_masks(parc, label)
+            with tempfile.TemporaryDirectory() as tmp:
+                t1_ras = Path(tmp) / "t1n_ras.nii.gz"
+                _write_canonical_t1(case_dir, t1_ras)
+                parc, cleaned, anatomy_removed = parcellate_case(
+                    t1_ras,
+                    label,
+                    affine,
+                    case_id=case_id,
+                    device=device,
+                )
+        else:
+            from recon.anatomy import excise_tumor
+
+            parc = np.rint(np.squeeze(np.asarray(parc))).astype(np.int16)
+            cleaned, anatomy_removed = excise_tumor(parc, label)
+        from recon.anatomy import cleaned_structure_masks, save_anatomy_seg
+
+        anatomy_path = out_dir / "anatomy_seg.nii.gz"
+        save_anatomy_seg(cleaned, reference, anatomy_path, out_dir / "pred_seg.nii.gz")
+        masks, removed = cleaned_structure_masks(parc, label)
+        if parc is not None:
             for name, mask in masks.items():
                 if not np.any(mask):
                     continue
@@ -331,6 +353,7 @@ def build_scene(
         "structures": structures,
         "tract_proximity": proximity,
         "removed_voxels": {name: int(count) for name, count in removed.items()},
+        "anatomy_removed_voxels": {name: int(count) for name, count in anatomy_removed.items()},
     }
     (out_dir / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     return manifest

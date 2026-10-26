@@ -1,8 +1,10 @@
 """Grid-search post-processing on cached validation probabilities.
 
-Thresholds are the grid 0.4, 0.5, 0.6, 0.7. A first pass pairs one shared
-threshold with each minimum-component triple. A second pass searches every
-per-head threshold combination at the winning component sizes.
+Thresholds are the grid 0.4 to 0.9 in steps of 0.1. A first pass pairs one
+shared threshold with each minimum-component triple. A second pass searches
+every per-head threshold combination at the winning component sizes. A winner
+on the largest threshold or component size is reported as being at the edge
+of the grid. ``--workers`` evaluates settings in parallel processes.
 
 The saved config is the one with the highest mean precision whose mean Dice
 (WT, TC, ET) is at least the raw 0.5-threshold Dice minus 0.01. Raw scores
@@ -15,7 +17,7 @@ cached case from that checkpoint's training list, and writes
 
 Example:
     python scripts/tune_postprocess.py
-    python scripts/tune_postprocess.py --model abhinav_v3
+    python scripts/tune_postprocess.py --model abhinav_v3 --workers 2
 """
 
 from __future__ import annotations
@@ -24,6 +26,7 @@ import argparse
 import csv
 import itertools
 import json
+import multiprocessing
 import sys
 from pathlib import Path
 
@@ -49,13 +52,15 @@ from recon.splits import ABHINAV_V3, MODEL_NAMES, OURS, model_name  # noqa: E402
 
 _HEADS = ("ET", "TC", "WT")
 
-THRESHOLD_VALUES = (0.4, 0.5, 0.6, 0.7)
+THRESHOLD_VALUES = (0.4, 0.5, 0.6, 0.7, 0.8, 0.9)
 # Minimum 26-connected component sizes, in voxels.
 MIN_COMPONENT_GRID = (
     {"ET": 0, "TC": 0, "WT": 0},
     {"ET": 20, "TC": 50, "WT": 100},
     {"ET": 50, "TC": 150, "WT": 300},
     {"ET": 100, "TC": 300, "WT": 600},
+    {"ET": 200, "TC": 600, "WT": 1200},
+    {"ET": 400, "TC": 1200, "WT": 2400},
 )
 
 
@@ -179,7 +184,7 @@ def search_configs(base: PostConfig) -> list[PostConfig]:
 
 
 def threshold_grid(base: PostConfig, min_voxels: dict) -> list[PostConfig]:
-    """Every ET/TC/WT threshold in 0.4–0.7 at one component-size setting."""
+    """Every ET/TC/WT threshold combination at one component-size setting."""
     configs = []
     for values in itertools.product(THRESHOLD_VALUES, repeat=len(_HEADS)):
         configs.append(_config(base, dict(zip(_HEADS, values)), min_voxels))
@@ -224,6 +229,46 @@ def evaluate_config(cases: list[CachedCase], config: PostConfig) -> dict:
     scores = _overlap_cases(cases, masks_for_case)
     mean_dice, mean_precision = _mean_dice_precision(scores)
     return {"config": config, "mean_dice": mean_dice, "mean_precision": mean_precision, "scores": scores}
+
+
+_WORKER_CASES: list[CachedCase] | None = None
+
+
+def _init_worker(cases: list[CachedCase]) -> None:
+    global _WORKER_CASES
+    _WORKER_CASES = cases
+
+
+def _evaluate_in_worker(config: PostConfig) -> dict:
+    return evaluate_config(_WORKER_CASES, config)
+
+
+def evaluate_configs(cases: list[CachedCase], configs: list[PostConfig], workers: int = 1):
+    """Yield ``evaluate_config`` results in ``configs`` order.
+
+    With ``workers > 1`` the cases are shared with child processes: forked
+    where the platform allows it, otherwise pickled once per worker.
+    """
+    if workers <= 1 or len(configs) <= 1:
+        for config in configs:
+            yield evaluate_config(cases, config)
+        return
+    methods = multiprocessing.get_all_start_methods()
+    context = multiprocessing.get_context("fork" if "fork" in methods else None)
+    with context.Pool(min(workers, len(configs)), initializer=_init_worker, initargs=(cases,)) as pool:
+        yield from pool.imap(_evaluate_in_worker, configs)
+
+
+def grid_edges(config: PostConfig) -> list[str]:
+    """Parameters of ``config`` that sit on the largest value searched."""
+    edges = [
+        f"{name} threshold {config.threshold(name):.2f}"
+        for name in _HEADS
+        if config.threshold(name) >= max(THRESHOLD_VALUES)
+    ]
+    if _min_voxels(config) == MIN_COMPONENT_GRID[-1]:
+        edges.append("component sizes " + "/".join(str(config.min_voxels(name)) for name in _HEADS))
+    return edges
 
 
 def evaluate_raw(cases: list[CachedCase], threshold=0.5) -> dict:
@@ -309,11 +354,12 @@ def run(
     report_path: Path,
     margin: float = 0.01,
     model: str = OURS,
+    workers: int = 1,
 ) -> PostConfig | None:
     model = model_name(model)
     cases = load_cached_cases(cache_dir, model)
     base = PostConfig.from_yaml(config_path) if Path(config_path).is_file() else PostConfig()
-    print(f"model={model} cases={len(cases)} margin={margin}", flush=True)
+    print(f"model={model} cases={len(cases)} margin={margin} workers={workers}", flush=True)
     raw_fast = evaluate_raw(cases)
     print(
         f"raw 0.5  mean_dice={raw_fast['mean_dice']:.4f}  mean_precision={raw_fast['mean_precision']:.4f}",
@@ -321,8 +367,8 @@ def run(
     )
     scored = []
     first_pass = search_configs(base)
-    for index, config in enumerate(first_pass, start=1):
-        result = evaluate_config(cases, config)
+    for index, result in enumerate(evaluate_configs(cases, first_pass, workers), start=1):
+        config = result["config"]
         scored.append(result)
         print(
             f"[{index}/{len(first_pass)}] thr=({config.threshold_et:.2f},{config.threshold_tc:.2f},{config.threshold_wt:.2f}) "
@@ -340,14 +386,17 @@ def run(
          item["config"].min_voxels_et, item["config"].min_voxels_tc, item["config"].min_voxels_wt)
         for item in scored
     }
-    for config in threshold_grid(base, size_for_grid):
-        key = (
+    second_pass = [
+        config
+        for config in threshold_grid(base, size_for_grid)
+        if (
             config.threshold_et, config.threshold_tc, config.threshold_wt,
             config.min_voxels_et, config.min_voxels_tc, config.min_voxels_wt,
-        )
-        if key in already:
-            continue
-        result = evaluate_config(cases, config)
+        ) not in already
+    ]
+    print(f"threshold grid: {len(second_pass)} settings", flush=True)
+    for result in evaluate_configs(cases, second_pass, workers):
+        config = result["config"]
         scored.append(result)
         print(
             f"[thresholds] thr=({config.threshold_et:.2f},{config.threshold_tc:.2f},{config.threshold_wt:.2f}) "
@@ -383,6 +432,9 @@ def run(
         f"dice={post_summary['mean_dice']:.4f} prec={post_summary['mean_precision']:.4f}",
         flush=True,
     )
+    edges = grid_edges(chosen)
+    if edges:
+        print(f"note: winner is at the edge of the grid ({', '.join(edges)}); a wider grid may do better", flush=True)
     print(f"wrote {config_path}", flush=True)
     print(f"wrote {report_path}", flush=True)
     return chosen
@@ -395,6 +447,7 @@ def main() -> None:
     parser.add_argument("--config", type=Path, default=None, help="Default: configs/postprocess_<model>.yaml")
     parser.add_argument("--report", type=Path, default=None)
     parser.add_argument("--margin", type=float, default=0.01)
+    parser.add_argument("--workers", type=int, default=1, help="Parallel processes for the grid. Each holds the cropped cache in memory on Windows")
     args = parser.parse_args()
     run(
         args.cache_dir or default_cache_dir(args.model),
@@ -402,6 +455,7 @@ def main() -> None:
         args.report or default_report_path(args.model),
         args.margin,
         args.model,
+        args.workers,
     )
 
 

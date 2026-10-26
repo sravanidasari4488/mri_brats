@@ -1,0 +1,18 @@
+# SegResNet head thresholds, keyed by region name (ET, TC, WT).
+# Updated by scripts/tune_postprocess.py.
+thresholds:
+  ET: 0.7
+  TC: 0.7
+  WT: 0.7
+
+# Minimum 26-connected component size, in voxels (mm^3 when the volume is 1 mm isotropic).
+min_voxels:
+  ET: 100
+  TC: 300
+  WT: 600
+
+# If the remaining enhancing tumor is smaller than this, drop it. Those voxels stay NCR.
+et_min_voxels: 100
+
+# binary_closing iterations on the nonzero-voxel brain mask before hole filling.
+brain_closing_iterations: 2

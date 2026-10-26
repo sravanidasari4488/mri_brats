@@ -35,10 +35,10 @@ def _save(path, label, probs):
 
 
 def _build_cache(cache: Path):
-    shape = (20, 20, 20)
-    # Slab at probability 0.55 is larger than every size cutoff, so only a
-    # threshold above 0.5 can remove it. The speck is 10 voxels at 0.95, so
-    # only a WT minimum above 10 can remove it.
+    shape = (40, 40, 20)
+    # Slab at probability 0.55 (3200 voxels) is larger than every size cutoff,
+    # so only a threshold above 0.5 can remove it. The speck is 10 voxels at
+    # 0.95, so only a WT minimum above 10 can remove it.
     slab = np.zeros(shape, dtype=bool)
     slab[:, :, 0:2] = True
     speck = np.zeros(shape, dtype=bool)
@@ -121,6 +121,28 @@ def test_grid_search_writes_yaml_and_ablation(tmp_path=None):
     assert post["hd95_mm"] != ""
 
 
+def test_parallel_grid_matches_serial_and_edges_are_reported(tmp_path=None):
+    from scripts import tune_postprocess as tune
+
+    root = Path(tmp_path) if tmp_path is not None else Path(__import__("tempfile").mkdtemp())
+    _build_cache(root)
+    cases = tune.load_cached_cases(root)
+    configs = tune.threshold_grid(PostConfig(), tune.MIN_COMPONENT_GRID[1])[:6]
+    serial = [(r["mean_dice"], r["mean_precision"]) for r in tune.evaluate_configs(cases, configs, 1)]
+    parallel = list(tune.evaluate_configs(cases, configs, 2))
+    assert [(r["mean_dice"], r["mean_precision"]) for r in parallel] == serial
+    assert [r["config"] for r in parallel] == configs
+
+    top = max(tune.THRESHOLD_VALUES)
+    inside = tune._config(PostConfig(), {"ET": 0.7, "TC": 0.7, "WT": 0.7}, tune.MIN_COMPONENT_GRID[3])
+    assert tune.grid_edges(inside) == []
+    edge = tune._config(PostConfig(), {"ET": top, "TC": 0.7, "WT": 0.7}, tune.MIN_COMPONENT_GRID[-1])
+    edges = tune.grid_edges(edge)
+    assert edges[0] == f"ET threshold {top:.2f}"
+    assert edges[1].startswith("component sizes")
+
+
 if __name__ == "__main__":
     test_grid_search_writes_yaml_and_ablation()
+    test_parallel_grid_matches_serial_and_edges_are_reported()
     print("tune ok")

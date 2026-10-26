@@ -54,38 +54,39 @@ def test_low_precision_is_listed_before_the_gallery(tmp_path=None):
             name: {"dice": 1.0, "hd95_mm": 0.0, "precision": 0.97, "lesion_fp": 0}
             for name in ("WT", "TC", "ET")
         },
-        "volume_error_pct": {"edema": 1.0, "necrosis": None, "enhancing": 0.5},
-        "watertight": {"edema": True, "necrosis": None, "enhancing": True},
+        "volume_error_pct": {"WT": 1.0, "TC": -12.0, "ET": None},
+        "watertight": {"WT": True, "TC": True, "ET": None},
         "reasons": review_reasons(
             {name: {"precision": 0.97} for name in ("WT", "TC", "ET")},
-            {"edema": 1.0, "necrosis": None, "enhancing": 0.5},
+            {"WT": True, "TC": True, "ET": None},
         ),
         "images": record["images"],
     }
     assert clean["reasons"] == []
-    swollen = {
-        "case_id": "swollen",
+    open_shell = {
+        "case_id": "open_shell",
         "regions": {
             name: {"dice": 0.8, "hd95_mm": 2.0, "precision": 0.95, "lesion_fp": 1}
             for name in ("WT", "TC", "ET")
         },
-        "volume_error_pct": {"edema": 4.2, "necrosis": None, "enhancing": None},
-        "watertight": {"edema": True, "necrosis": None, "enhancing": None},
+        "volume_error_pct": {"WT": 0.5, "TC": None, "ET": None},
+        "watertight": {"WT": True, "TC": False, "ET": None},
         "reasons": [],
         "images": record["images"],
     }
-    swollen["reasons"] = review_reasons(swollen["regions"], swollen["volume_error_pct"])
-    assert any("volume error" in reason for reason in swollen["reasons"])
+    open_shell["reasons"] = review_reasons(open_shell["regions"], open_shell["watertight"])
+    assert open_shell["reasons"] == ["TC mesh not watertight"]
 
-    report = write_report([clean, record, swollen], root / "index.html")
+    report = write_report([clean, record, open_shell], root / "index.html")
     text = report.read_text(encoding="utf-8")
     assert text.index("Manual review") < text.index("All cases")
     review = text.split("All cases")[0]
     assert "low_precision" in review
-    assert "swollen" in review
+    assert "open_shell" in review
     assert "clean" not in review.split("<ul>")[-1]
     assert "Dice" in text and "HD95" in text and "FP components" in text
-    assert "necrosis —" in text
+    assert "WT +1.0%, TC -12.0%, ET —" in text
+    assert "TC not watertight" in text
 
 
 def test_cutoffs_and_undefined_distance():
@@ -97,13 +98,11 @@ def test_cutoffs_and_undefined_distance():
     assert tumor_center(ground_truth, prediction) == (3, 3, 3)
 
     exact = {name: {"precision": 0.9} for name in ("WT", "TC", "ET")}
-    assert review_reasons(exact, {"edema": 3.0, "necrosis": -3.0, "enhancing": float("nan")}) == []
+    assert review_reasons(exact, {"WT": True, "TC": True, "ET": None}) == []
+    assert review_reasons(exact) == []
     low = dict(exact)
     low["TC"] = {"precision": 0.899}
-    assert review_reasons(low, {"edema": None, "necrosis": None, "enhancing": None}) == ["TC precision 0.899"]
-    swollen = review_reasons(exact, {"edema": 3.01, "necrosis": None, "enhancing": -3.01})
-    assert any(reason.startswith("edema volume error") for reason in swollen)
-    assert any(reason.startswith("enhancing volume error") for reason in swollen)
+    assert review_reasons(low, {"WT": None, "TC": None, "ET": None}) == ["TC precision 0.899"]
 
     import tempfile
 
@@ -115,18 +114,48 @@ def test_cutoffs_and_undefined_distance():
             name: {"dice": 0.0, "hd95_mm": float("nan"), "precision": 0.95, "lesion_fp": 0}
             for name in ("WT", "TC", "ET")
         },
-        "volume_error_pct": {"edema": None, "necrosis": None, "enhancing": None},
-        "watertight": {"edema": None, "necrosis": None, "enhancing": None},
+        "volume_error_pct": {"WT": None, "TC": None, "ET": None},
+        "watertight": {"WT": None, "TC": None, "ET": None},
         "reasons": [],
         "images": blank_images,
     }
     text = write_report([record], root / "index.html").read_text(encoding="utf-8")
     assert "— / — / —" in text
     assert "No cases flagged." in text
-    assert "edema —, necrosis —, enhancing —" in text
+    assert "WT —, TC —, ET —" in text
+
+
+def test_thin_shell_shrinkage_does_not_flag_a_case():
+    import tempfile
+
+    shape = (40, 40, 40)
+    label = np.zeros(shape, dtype=np.uint8)
+    _ball(shape, (20, 20, 20), 12, 2, label)
+    _ball(shape, (20, 20, 20), 9, 3, label)
+    _ball(shape, (20, 20, 20), 7, 1, label)
+    probs = np.zeros((3,) + shape, dtype=np.float32)
+    probs[0][label == 3] = 0.95
+    probs[1][(label == 1) | (label == 3)] = 0.95
+    probs[2][label > 0] = 0.95
+    image = np.ones((4,) + shape, dtype=np.float32)
+    record = evaluate_case(
+        "thin_rim",
+        image,
+        label,
+        probs,
+        (1.0, 1.0, 1.0),
+        np.eye(4),
+        Path(tempfile.mkdtemp()),
+        PostConfig(0.5, 0.5, 0.5, 0, 0, 0, 0, 1),
+    )
+    assert set(record["volume_error_pct"]) == {"WT", "TC", "ET"}
+    assert all(record["watertight"][name] for name in ("WT", "TC", "ET"))
+    assert all(record["volume_error_pct"][name] < -3.0 for name in ("WT", "TC", "ET"))
+    assert record["reasons"] == []
 
 
 if __name__ == "__main__":
     test_cutoffs_and_undefined_distance()
     test_low_precision_is_listed_before_the_gallery()
+    test_thin_shell_shrinkage_does_not_flag_a_case()
     print("qa ok")

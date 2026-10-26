@@ -4,8 +4,13 @@ For each case, write axial, coronal, and sagittal PNGs through the tumor
 centre (green ground-truth contour, red prediction contour) and a 3D
 screenshot of the tumor meshes. ``reports/qa/index.html`` lists Dice, HD95,
 precision, false-positive components, and mesh volume error. Cases with any
-region precision below 0.9, or any tumor-mesh volume error beyond 3% in
-magnitude, are repeated at the top for manual review.
+region precision below 0.9, or a WT/TC/ET shell that is not watertight, are
+repeated at the top for manual review.
+
+Mesh volume error compares each nested WT/TC/ET shell, as the viewer renders
+it, with the voxel volume of the same predicted mask. It measures meshing, not
+segmentation: smoothing shrinks thin regions such as an enhancing rim, so the
+error is reported but does not trigger review.
 
 Example:
     python scripts/qa_report.py
@@ -42,7 +47,6 @@ _DEFAULT_CACHE = ROOT / "caches" / "val_probs"
 _DEFAULT_OUT = ROOT / "reports" / "qa"
 
 PRECISION_MIN = 0.9
-VOLUME_ERROR_MAX_PCT = 3.0
 _PLANES = (("sagittal", 0), ("coronal", 1), ("axial", 2))
 _COMPARTMENTS = ("edema", "necrosis", "enhancing")
 _RENDER_COLORS = {
@@ -63,19 +67,16 @@ def tumor_center(ground_truth, prediction) -> tuple[int, int, int]:
     return tuple(int(size // 2) for size in shape)
 
 
-def review_reasons(regions: dict, volume_error_pct: dict) -> list[str]:
-    """Precision below 0.9, or a mesh volume error outside ±3%."""
+def review_reasons(regions: dict, watertight: dict | None = None) -> list[str]:
+    """Precision below 0.9, or a WT/TC/ET shell that is not watertight."""
     reasons = []
     for name in REGION_NAMES:
         precision = regions[name]["precision"]
         if precision < PRECISION_MIN:
             reasons.append(f"{name} precision {precision:.3f}")
-    for name in _COMPARTMENTS:
-        error = volume_error_pct.get(name)
-        if error is None or not np.isfinite(error):
-            continue
-        if abs(error) > VOLUME_ERROR_MAX_PCT:
-            reasons.append(f"{name} volume error {error:+.1f}%")
+    for name in REGION_NAMES:
+        if (watertight or {}).get(name) is False:
+            reasons.append(f"{name} mesh not watertight")
     return reasons
 
 
@@ -125,19 +126,22 @@ def compartment_masks(label) -> dict[str, np.ndarray]:
     }
 
 
-def mesh_volume_errors(label, affine) -> tuple[dict, dict, dict]:
-    """Per-compartment mesh, signed volume error (%), and watertight flag."""
-    meshes = {}
+def compartment_meshes(label, affine) -> dict:
+    """Edema, necrosis, and enhancing meshes for the 3D screenshot."""
+    return {
+        name: mesh_from_mask(mask, affine) if np.any(mask) else None
+        for name, mask in compartment_masks(label).items()
+    }
+
+
+def mesh_volume_errors(label, affine) -> tuple[dict, dict]:
+    """Signed volume error (%) and watertight flag of each nested WT/TC/ET shell."""
     errors = {}
     watertight = {}
-    for name, mask in compartment_masks(label).items():
-        if not np.any(mask):
-            meshes[name] = None
-            errors[name] = None
-            watertight[name] = None
-            continue
-        mesh = mesh_from_mask(mask, affine)
-        meshes[name] = mesh
+    regions = regions_from_label(label)
+    for name in REGION_NAMES:
+        mask = regions[name]
+        mesh = mesh_from_mask(mask, affine) if np.any(mask) else None
         if mesh is None:
             errors[name] = None
             watertight[name] = None
@@ -145,7 +149,7 @@ def mesh_volume_errors(label, affine) -> tuple[dict, dict, dict]:
         closed, error = check_mesh(mesh, mask, affine)
         watertight[name] = closed
         errors[name] = None if not np.isfinite(error) else float(error)
-    return meshes, errors, watertight
+    return errors, watertight
 
 
 def save_render(meshes: dict, dest: Path) -> Path:
@@ -204,12 +208,12 @@ def evaluate_case(case_id, image, label, probs, spacing, affine, out_dir: Path, 
     brain = brain_mask_from_image(image, config)
     prediction = postprocess(np.asarray(probs, dtype=np.float32), brain, config)
     regions = score_case(prediction, label, spacing, case_id=case_id, model=model)
-    meshes, errors, watertight = mesh_volume_errors(prediction, affine)
+    errors, watertight = mesh_volume_errors(prediction, affine)
     folder = out_dir / "images" / case_id
     center = tumor_center(label, prediction)
     panels = save_slice_panels(_flair(image), label, prediction, center, folder)
-    render = save_render(meshes, folder)
-    reasons = review_reasons(regions, errors)
+    render = save_render(compartment_meshes(prediction, affine), folder)
+    reasons = review_reasons(regions, watertight)
     return {
         "case_id": case_id,
         "center": center,
@@ -241,7 +245,7 @@ def _metric_cell(record, key, digits) -> str:
 
 def _error_cell(record) -> str:
     parts = []
-    for name in _COMPARTMENTS:
+    for name in REGION_NAMES:
         error = record["volume_error_pct"].get(name)
         closed = record["watertight"].get(name)
         if error is None and closed is None:
@@ -274,7 +278,9 @@ def write_report(cases: list[dict], path: Path) -> Path:
         "<h1>Validation QA</h1>",
         "<p>Slices are through the whole-tumor centre. Green is ground truth, red is the prediction. "
         "Metrics are WT / TC / ET. A case is listed for manual review when any region precision is below "
-        f"{PRECISION_MIN:.1f} or any mesh volume error exceeds {VOLUME_ERROR_MAX_PCT:.0f}% in magnitude.</p>",
+        f"{PRECISION_MIN:.1f} or a WT/TC/ET mesh is not watertight. Mesh volume error compares each nested "
+        "shell with its own predicted voxel mask. It measures smoothing, not segmentation, so it does not "
+        "trigger review.</p>",
         "<h2>Manual review</h2>",
     ]
     if not flagged:
@@ -289,7 +295,7 @@ def write_report(cases: list[dict], path: Path) -> Path:
     parts.append("<h2>All cases</h2>")
     parts.append(
         "<table><thead><tr><th>Case</th><th>Dice</th><th>HD95 (mm)</th><th>Precision</th>"
-        "<th>FP components</th><th>Mesh volume error</th></tr></thead><tbody>"
+        "<th>FP components</th><th>Mesh volume error (shell vs mask)</th></tr></thead><tbody>"
     )
     for case in cases:
         case_id = html.escape(case["case_id"])

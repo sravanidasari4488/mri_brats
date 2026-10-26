@@ -33,6 +33,7 @@ Example:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import io
 import json
 import os
@@ -156,14 +157,32 @@ def default_out_dir(model: str) -> Path:
     return _DEFAULT_OUT
 
 
-def _check_resume(out_dir: Path, model: str, checkpoint: Path) -> None:
+def checkpoint_sha256(checkpoint: Path) -> str:
+    digest = hashlib.sha256()
+    with Path(checkpoint).open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1 << 20), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _check_resume(out_dir: Path, model: str, checkpoint: Path, sha256: str) -> None:
+    """Refuse to resume into a cache from another model or checkpoint.
+
+    Checkpoints are matched by content hash, so a cache started on Colab can
+    be resumed on another machine where the same file lives at another path.
+    """
     manifest = out_dir / "manifest.json"
     if not manifest.is_file():
         return
     previous = json.loads(manifest.read_text(encoding="utf-8"))
     old_model = previous.get("model", OURS)
     old_ckpt = previous.get("checkpoint")
-    if old_model != model or (old_ckpt is not None and Path(old_ckpt) != Path(checkpoint)):
+    old_sha = previous.get("checkpoint_sha256")
+    if old_sha is not None:
+        other_checkpoint = old_sha != sha256
+    else:
+        other_checkpoint = old_ckpt is not None and Path(old_ckpt) != Path(checkpoint)
+    if old_model != model or other_checkpoint:
         raise RuntimeError(
             f"{out_dir} holds probabilities from model={old_model} checkpoint={old_ckpt}. "
             "Pass a new --out-dir so the resume does not mix models."
@@ -268,7 +287,8 @@ def main() -> None:
     if args.dry_run:
         return
 
-    _check_resume(args.out_dir, kind, args.checkpoint)
+    sha256 = checkpoint_sha256(args.checkpoint)
+    _check_resume(args.out_dir, kind, args.checkpoint, sha256)
     args.out_dir.mkdir(parents=True, exist_ok=True)
     manifest = {
         "seed": args.seed,
@@ -279,6 +299,7 @@ def main() -> None:
         "channel_order": list(CHANNEL_ORDER),
         "model": kind,
         "checkpoint": str(args.checkpoint),
+        "checkpoint_sha256": sha256,
         "roi": list(roi_for(kind)),
         "tta": "full" if args.full_tta else "fast",
         "tta_views": 8 if args.full_tta else 4,

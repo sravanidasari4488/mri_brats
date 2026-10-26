@@ -46,3 +46,36 @@ def test_truncated_and_empty_caches_are_not_skipped(tmp_path):
     assert not cache._cache_exists(empty)
     assert not cache._cache_exists(truncated)
     assert not cache._cache_exists(missing)
+
+
+def test_resume_matches_checkpoint_by_content_not_path(tmp_path):
+    import json
+
+    cache = _cache()
+    ckpt = tmp_path / "best_model.pt"
+    ckpt.write_bytes(b"weights")
+    sha = cache.checkpoint_sha256(ckpt)
+    out_dir = tmp_path / "cache"
+    out_dir.mkdir()
+    manifest = {"model": "abhinav_v3", "checkpoint": "/content/ckpt/best_model.pt", "checkpoint_sha256": sha}
+    (out_dir / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+
+    cache._check_resume(out_dir, "abhinav_v3", ckpt, sha)
+    for model, digest in (("ours", sha), ("abhinav_v3", "0" * 64)):
+        try:
+            cache._check_resume(out_dir, model, ckpt, digest)
+        except RuntimeError:
+            continue
+        raise AssertionError(f"resume accepted model={model} sha={digest[:8]}")
+
+
+if __name__ == "__main__":
+    import tempfile
+
+    for test in (
+        test_write_npz_lands_in_the_output_dir_and_reloads,
+        test_truncated_and_empty_caches_are_not_skipped,
+        test_resume_matches_checkpoint_by_content_not_path,
+    ):
+        test(Path(tempfile.mkdtemp()))
+    print("cache ok")

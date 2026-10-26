@@ -24,7 +24,7 @@ SEG_SUFFIX = "seg"
 _normalize_like_training = NormalizeIntensity(nonzero=True, channel_wise=True)
 
 
-def load_case(case_dir: str | Path) -> dict:
+def load_case(case_dir: str | Path, *, normalize: bool = True) -> dict:
     """Load one BraTS 2021+ case folder.
 
     Reads ``t2f``, ``t1n``, ``t1c``, ``t2w``, and ``seg``, reorients each
@@ -34,6 +34,8 @@ def load_case(case_dir: str | Path) -> dict:
     the RAS ``affine``, voxel ``spacing``, and ``case_id``.
 
     Labels stay 1 = NCR, 2 = ED, 3 = ET. Legacy ET label 4 is rewritten to 3.
+    ``normalize=False`` leaves raw intensities for a model whose own
+    preprocessing applies the z-score.
     """
     case_dir = Path(case_dir)
     if not case_dir.is_dir():
@@ -54,7 +56,10 @@ def load_case(case_dir: str | Path) -> dict:
     assert affine is not None
 
     stacked = np.stack(channels, axis=0)
-    image = np.asarray(_normalize_like_training(stacked), dtype=np.float32)
+    if normalize:
+        image = np.asarray(_normalize_like_training(stacked), dtype=np.float32)
+    else:
+        image = np.asarray(stacked, dtype=np.float32)
     return {
         "image": np.ascontiguousarray(image),
         "seg": np.ascontiguousarray(seg),

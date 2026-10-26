@@ -37,6 +37,19 @@
     <aside id="panel">
       <h1 id="case-title">Case</h1>
       <p id="tract-note" hidden>Tracts are atlas-estimated, not patient tractography.</p>
+      <div id="presets"></div>
+      <label class="label-mode">Labels
+        <select id="label-mode">
+          <option value="all">All</option>
+          <option value="hover">Hovered only</option>
+          <option value="off">Off</option>
+        </select>
+      </label>
+      <button id="screenshot" type="button">Save PNG</button>
+      <section id="tumor-card">
+        <h2>Tumor location</h2>
+        <div id="tumor-location"></div>
+      </section>
       <div id="groups"></div>
       <section>
         <h2>MRI slice</h2>

@@ -14,9 +14,19 @@ as soon as it finishes, so a Colab runtime that disconnects keeps every
 completed file on Drive. A case whose ``.npz`` already opens is skipped.
 A truncated file is computed again.
 
+The default pass is the faster one: four views and overlap 0.5. CUDA also
+runs that pass in float16. ``--full-tta`` restores eight views and overlap
+0.625.
+
+``--model abhinav_v3`` caches every case in ``splits/abhinav_heldout.txt``
+into ``caches/val_probs_abhinav_v3`` instead of the seed-42 split, and
+refuses any case from that checkpoint's training list. An output directory
+already cached with a different model or checkpoint is refused.
+
 Example:
     python scripts/cache_probs.py
     python scripts/cache_probs.py --dry-run
+    python scripts/cache_probs.py --model abhinav_v3
     python scripts/cache_probs.py --out-dir "/content/drive/MyDrive/brats/val_probs"
 """
 
@@ -32,22 +42,25 @@ import zipfile
 from pathlib import Path
 
 import numpy as np
-from monai.transforms import (
-    Compose,
-    EnsureChannelFirstd,
-    EnsureTyped,
-    LoadImaged,
-    MapLabelValued,
-    NormalizeIntensityd,
-    Orientationd,
-    Spacingd,
-)
+from monai.transforms import Compose
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from recon.infer import CHANNEL_ORDER, ROI_SIZE, default_device, load_model, predict_probs  # noqa: E402
+from recon.infer import (  # noqa: E402
+    ABHINAV_V3,
+    CHANNEL_ORDER,
+    OURS,
+    default_device,
+    load_model,
+    model_name,
+    predict_probs,
+    resolve_checkpoint,
+    roi_for,
+    validation_transform,
+)
+from recon.splits import check_reportable, heldout_case_ids, read_case_list  # noqa: E402
 from recon.postprocess import brain_mask_from_image  # noqa: E402
 
 _DEFAULT_DATA = Path(r"C:\Users\Sravani\Desktop\MRI project\data\processed\brats_nifti")
@@ -59,24 +72,9 @@ _REQUIRED = ("flair.nii.gz", "t1.nii.gz", "t1c.nii.gz", "t2.nii.gz", "mask.nii.g
 _MODALITIES = ("flair", "t1", "t1c", "t2")
 
 
-def _training_transform() -> Compose:
-    """Full-volume validation transform: RAS, 1 mm, label remap, nonzero z-score."""
-    keys = ["image", "label"]
-    return Compose(
-        [
-            LoadImaged(keys=keys, image_only=False),
-            EnsureChannelFirstd(keys=keys),
-            Orientationd(keys=keys, axcodes="RAS"),
-            Spacingd(keys=keys, pixdim=(1.0, 1.0, 1.0), mode=("bilinear", "nearest")),
-            MapLabelValued(
-                keys=["label"],
-                orig_labels=[0, 1, 2, 4],
-                target_labels=[0, 1, 2, 3],
-            ),
-            NormalizeIntensityd(keys=["image"], nonzero=True, channel_wise=True),
-            EnsureTyped(keys=keys),
-        ]
-    )
+def _training_transform(name: str = OURS) -> Compose:
+    """Full-volume validation transform for ``name``."""
+    return validation_transform(name)
 
 
 def complete_cases(root: Path) -> list[Path]:
@@ -114,6 +112,62 @@ def held_out_cases(root: Path, n: int, *, val_ratio: float = 0.2, seed: int = 42
     if leaked:
         raise RuntimeError(f"Held-out cases overlap training: {leaked}")
     return selected, train
+
+
+def listed_cases(root: Path, case_ids, model: str, n: int | None = None) -> list[Path]:
+    """Case folders for ``case_ids`` under ``root``. Training cases for ``model`` are refused."""
+    ids = list(case_ids)
+    check_reportable(ids, model)
+    complete = {path.name: path for path in complete_cases(root)}
+    missing = [case_id for case_id in ids if case_id not in complete]
+    if missing:
+        raise FileNotFoundError(f"{len(missing)} listed cases are missing or incomplete under {root}: {missing[:5]}")
+    selected = [complete[case_id] for case_id in ids]
+    return selected if n is None else selected[:n]
+
+
+def select_cases(
+    root: Path,
+    model: str,
+    *,
+    num_cases: int | None = None,
+    case_list: Path | None = None,
+    val_ratio: float = 0.2,
+    seed: int = 42,
+) -> tuple[list[Path], list[str]]:
+    """Cases to cache or score, and a description of where they came from.
+
+    ``abhinav_v3`` defaults to ``splits/abhinav_heldout.txt``. ``ours``
+    defaults to the first 40 of the seed-42 validation split.
+    """
+    model = model_name(model)
+    ids = read_case_list(case_list) if case_list is not None else heldout_case_ids(model)
+    if ids is not None:
+        source = str(case_list) if case_list is not None else f"splits/abhinav_heldout.txt ({model})"
+        return listed_cases(root, ids, model, num_cases), [f"list={source}", f"n_listed={len(ids)}"]
+    n = 40 if num_cases is None else num_cases
+    selected, train = held_out_cases(root, n, val_ratio=val_ratio, seed=seed)
+    return selected, [f"validation split (train={len(train)}, seed={seed}, val_ratio={val_ratio})"]
+
+
+def default_out_dir(model: str) -> Path:
+    if model_name(model) == ABHINAV_V3:
+        return ROOT / "caches" / "val_probs_abhinav_v3"
+    return _DEFAULT_OUT
+
+
+def _check_resume(out_dir: Path, model: str, checkpoint: Path) -> None:
+    manifest = out_dir / "manifest.json"
+    if not manifest.is_file():
+        return
+    previous = json.loads(manifest.read_text(encoding="utf-8"))
+    old_model = previous.get("model", OURS)
+    old_ckpt = previous.get("checkpoint")
+    if old_model != model or (old_ckpt is not None and Path(old_ckpt) != Path(checkpoint)):
+        raise RuntimeError(
+            f"{out_dir} holds probabilities from model={old_model} checkpoint={old_ckpt}. "
+            "Pass a new --out-dir so the resume does not mix models."
+        )
 
 
 def _spacing_mm(image) -> np.ndarray:
@@ -180,38 +234,55 @@ def _load_case(case_dir: Path, transform: Compose) -> tuple[np.ndarray, np.ndarr
 def main() -> None:
     parser = argparse.ArgumentParser(description="Cache TTA probabilities for held-out BraTS validation cases")
     parser.add_argument("--data-dir", type=Path, default=_DEFAULT_DATA)
-    parser.add_argument("--checkpoint", type=Path, default=_DEFAULT_CKPT)
-    parser.add_argument("--out-dir", type=Path, default=_DEFAULT_OUT)
-    parser.add_argument("--num-cases", type=int, default=40)
+    parser.add_argument("--checkpoint", type=Path, default=None)
+    parser.add_argument("--model", choices=(OURS, ABHINAV_V3), default=OURS)
+    parser.add_argument("--out-dir", type=Path, default=None, help="Default: caches/val_probs or caches/val_probs_abhinav_v3")
+    parser.add_argument("--case-list", type=Path, default=None, help="Case ids to cache. Default for abhinav_v3: splits/abhinav_heldout.txt")
+    parser.add_argument("--num-cases", type=int, default=None, help="Default: 40 for ours, every listed case for abhinav_v3")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--val-ratio", type=float, default=0.2)
+    parser.add_argument(
+        "--full-tta",
+        action="store_true",
+        help="Eight flips and overlap 0.625. About twice as slow as the default four-view pass",
+    )
     parser.add_argument("--dry-run", action="store_true", help="Print the validation case ids and exit")
     args = parser.parse_args()
+    kind = model_name(args.model)
+    if args.checkpoint is None:
+        args.checkpoint = resolve_checkpoint(kind) if kind == ABHINAV_V3 else _DEFAULT_CKPT
+    if args.out_dir is None:
+        args.out_dir = default_out_dir(kind)
 
-    selected, train = held_out_cases(
-        args.data_dir, args.num_cases, val_ratio=args.val_ratio, seed=args.seed
+    selected, source = select_cases(
+        args.data_dir,
+        kind,
+        num_cases=args.num_cases,
+        case_list=args.case_list,
+        val_ratio=args.val_ratio,
+        seed=args.seed,
     )
-    print(
-        f"held-out {len(selected)} of validation split "
-        f"(train={len(train)}, seed={args.seed}, val_ratio={args.val_ratio})",
-        flush=True,
-    )
+    print(f"held-out {len(selected)} cases, model={kind}, {', '.join(source)}", flush=True)
     for path in selected:
         print(f"  {path.name}", flush=True)
     if args.dry_run:
         return
 
+    _check_resume(args.out_dir, kind, args.checkpoint)
     args.out_dir.mkdir(parents=True, exist_ok=True)
     manifest = {
         "seed": args.seed,
         "val_ratio": args.val_ratio,
-        "n_train": len(train),
+        "source": source,
         "n_cached": len(selected),
         "case_ids": [path.name for path in selected],
         "channel_order": list(CHANNEL_ORDER),
+        "model": kind,
         "checkpoint": str(args.checkpoint),
-        "roi": list(ROI_SIZE),
-        "tta": True,
+        "roi": list(roi_for(kind)),
+        "tta": "full" if args.full_tta else "fast",
+        "tta_views": 8 if args.full_tta else 4,
+        "overlap": 0.625 if args.full_tta else 0.5,
         "probs_dtype": "float16",
     }
     (args.out_dir / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
@@ -234,15 +305,21 @@ def main() -> None:
         return
 
     device = default_device()
-    print(f"device={device} roi={ROI_SIZE}", flush=True)
-    model = load_model(args.checkpoint, device)
-    transform = _training_transform()
+    tta_mode = True if args.full_tta else "fast"
+    overlap = 0.625 if args.full_tta else 0.5
+    roi = roi_for(kind)
+    print(
+        f"model={kind} device={device} roi={roi} tta={tta_mode} overlap={overlap}",
+        flush=True,
+    )
+    model = load_model(args.checkpoint, device, kind)
+    transform = _training_transform(kind)
     written = 0
     for index, case_dir in pending:
         out_path = args.out_dir / f"{case_dir.name}.npz"
         print(f"[{index}/{total}] {case_dir.name}", flush=True)
         image, label, spacing = _load_case(case_dir, transform)
-        probs = predict_probs(model, image, ROI_SIZE, tta=True)
+        probs = predict_probs(model, image, roi, tta_mode, overlap=overlap, model_name=kind)
         if probs.shape[1:] != label.shape:
             raise RuntimeError(f"{case_dir.name}: probs {probs.shape} vs label {label.shape}")
         brain = brain_mask_from_image(image).astype(np.uint8)
@@ -254,6 +331,7 @@ def main() -> None:
             spacing=spacing,
             channel_order=np.array(CHANNEL_ORDER),
             case_id=np.array(case_dir.name),
+            model=np.array(kind),
         )
         written += 1
         print(f"[{index}/{total}] saved {out_path.name}", flush=True)

@@ -1,11 +1,13 @@
 """Dice each SegResNet output channel against GT TC, WT, and ET.
 
-Runs three training cases with the training preprocessing and
+Runs three cases with the model's validation preprocessing and
 ``predict_probs`` (no post-processing). Prints the full channel/region
-matrix and the permutation that matches.
+matrix and the permutation that matches. ``ours`` takes the first sorted
+cases; ``abhinav_v3`` takes the first held-out cases.
 
 Example:
     python scripts/verify_channels.py
+    python scripts/verify_channels.py --model abhinav_v3
 """
 
 from __future__ import annotations
@@ -16,22 +18,26 @@ from pathlib import Path
 
 import numpy as np
 import torch
-from monai.transforms import (
-    Compose,
-    EnsureChannelFirstd,
-    EnsureTyped,
-    LoadImaged,
-    MapLabelValued,
-    NormalizeIntensityd,
-    Orientationd,
-    Spacingd,
-)
+from monai.transforms import Compose
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from recon.infer import ROI_SIZE, default_device, load_model, predict_probs  # noqa: E402
+from recon.infer import (  # noqa: E402
+    ABHINAV_V3,
+    CHANNEL_ORDER,
+    OURS,
+    default_device,
+    load_model,
+    model_name,
+    output_order,
+    predict_probs,
+    resolve_checkpoint,
+    roi_for,
+    validation_transform,
+)
+from recon.splits import check_reportable, heldout_case_ids  # noqa: E402
 
 REGIONS = ("TC", "WT", "ET")
 # On-disk names for the modalities recorded in the training checkpoint.
@@ -51,27 +57,20 @@ _DEFAULT_CKPT = Path(
 )
 
 
-def _training_transform() -> Compose:
-    """Validation path from training, full volume (no crop): RAS, 1 mm, z-score."""
-    keys = ["image", "label"]
-    return Compose(
-        [
-            LoadImaged(keys=keys, image_only=False),
-            EnsureChannelFirstd(keys=keys),
-            Orientationd(keys=keys, axcodes="RAS"),
-            Spacingd(keys=keys, pixdim=(1.0, 1.0, 1.0), mode=("bilinear", "nearest")),
-            MapLabelValued(
-                keys=["label"],
-                orig_labels=[0, 1, 2, 4],
-                target_labels=[0, 1, 2, 3],
-            ),
-            NormalizeIntensityd(keys=["image"], nonzero=True, channel_wise=True),
-            EnsureTyped(keys=keys),
-        ]
-    )
+def _training_transform(name: str = OURS) -> Compose:
+    """Validation transform for ``name``. Ours is RAS + 1 mm; abhinav_v3 is theirs."""
+    return validation_transform(name)
 
 
-def _case_dirs(root: Path, n: int) -> list[Path]:
+def _case_dirs(root: Path, n: int, model: str = OURS) -> list[Path]:
+    """First ``n`` cases. ``abhinav_v3`` takes them from ``splits/abhinav_heldout.txt``."""
+    listed = heldout_case_ids(model)
+    if listed is not None:
+        check_reportable(listed[:n], model)
+        cases = [root / case_id for case_id in listed[:n] if (root / case_id / "mask.nii.gz").is_file()]
+        if len(cases) < n:
+            raise FileNotFoundError(f"Needed {n} held-out cases under {root}, found {len(cases)}")
+        return cases
     cases = []
     for path in sorted(p for p in root.iterdir() if p.is_dir()):
         if (path / "mask.nii.gz").is_file():
@@ -94,7 +93,7 @@ def _checkpoint_info(ckpt_path: Path) -> tuple[tuple[str, ...], tuple[str, ...]]
 def _load_case(case_dir: Path, modalities: tuple[str, ...], transform: Compose) -> tuple[np.ndarray, np.ndarray]:
     image_paths = []
     for name in modalities:
-        filename = _FILE_FOR_MODALITY.get(name)
+        filename = _FILE_FOR_MODALITY.get(str(name).lower())
         if filename is None:
             raise KeyError(f"No filename for training modality {name!r}")
         path = case_dir / filename
@@ -142,42 +141,53 @@ def _ranked_mappings(mean_dice: np.ndarray) -> list[tuple[tuple[str, ...], float
 def main() -> None:
     parser = argparse.ArgumentParser(description="Check SegResNet output channel order against BraTS regions")
     parser.add_argument("--data-dir", type=Path, default=_DEFAULT_DATA)
-    parser.add_argument("--checkpoint", type=Path, default=_DEFAULT_CKPT)
+    parser.add_argument("--checkpoint", type=Path, default=None)
+    parser.add_argument("--model", choices=(OURS, ABHINAV_V3), default=OURS)
     parser.add_argument("--cases", type=int, default=3)
     parser.add_argument("--threshold", type=float, default=0.5)
     args = parser.parse_args()
+    kind = model_name(args.model)
+    if args.checkpoint is None:
+        args.checkpoint = resolve_checkpoint(kind) if kind == ABHINAV_V3 else _DEFAULT_CKPT
 
     device = default_device()
     modalities, trained_order = _checkpoint_info(args.checkpoint)
-    print(f"device={device} roi={ROI_SIZE} modalities={modalities}", flush=True)
+    if kind == ABHINAV_V3:
+        modalities = ("FLAIR", "T1", "T1c", "T2")
+        trained_order = output_order(kind)
+    roi = roi_for(kind)
+    print(f"model={kind} device={device} roi={roi} modalities={modalities}", flush=True)
+    print(f"source heads={output_order(kind)} pipeline={CHANNEL_ORDER}", flush=True)
     print(f"checkpoint out_regions={trained_order}", flush=True)
     print(f"checkpoint={args.checkpoint}", flush=True)
-    model = load_model(args.checkpoint, device)
-    transform = _training_transform()
+    model = load_model(args.checkpoint, device, kind)
+    transform = _training_transform(kind)
 
     per_case = []
-    for case_dir in _case_dirs(args.data_dir, args.cases):
+    for case_dir in _case_dirs(args.data_dir, args.cases, kind):
         print(f"running {case_dir.name}", flush=True)
         image, label = _load_case(case_dir, modalities, transform)
-        probs = predict_probs(model, image, ROI_SIZE, tta=True)
+        probs = predict_probs(model, image, roi, tta=True, model_name=kind)
         if probs.shape[1:] != label.shape:
             raise RuntimeError(f"{case_dir.name}: probs {probs.shape} vs label {label.shape}")
         gt = _regions(label)
         matrix = np.zeros((probs.shape[0], len(REGIONS)), dtype=np.float64)
         print(f"  labels={np.unique(label).tolist()} prob_shape={tuple(probs.shape)}")
-        for c in range(probs.shape[0]):
+        for c, channel in enumerate(CHANNEL_ORDER):
             pred = probs[c] > args.threshold
-            scores = [_dice(pred, gt[name]) for name in REGIONS]
+            scores = [_dice(pred, gt[region]) for region in REGIONS]
             matrix[c] = scores
-            formatted = "  ".join(f"{name}={score:.3f}" for name, score in zip(REGIONS, scores))
-            print(f"  ch{c}  {formatted}", flush=True)
+            formatted = "  ".join(f"{region}={score:.3f}" for region, score in zip(REGIONS, scores))
+            own = scores[REGIONS.index(channel)]
+            print(f"  {channel}  {formatted}  (own={own:.3f})", flush=True)
         per_case.append(matrix)
 
     mean_dice = np.mean(per_case, axis=0)
-    print("mean Dice (rows=output channels, cols=TC WT ET)", flush=True)
-    for c, row in enumerate(mean_dice):
+    print("mean Dice (rows=CHANNEL_ORDER ET TC WT, cols=TC WT ET)", flush=True)
+    for c, (channel, row) in enumerate(zip(CHANNEL_ORDER, mean_dice)):
         formatted = "  ".join(f"{name}={score:.3f}" for name, score in zip(REGIONS, row))
-        print(f"  ch{c}  {formatted}", flush=True)
+        own = row[REGIONS.index(channel)]
+        print(f"  {channel}  {formatted}  (own={own:.3f})", flush=True)
 
     ranked = _ranked_mappings(mean_dice)
     best, best_score = ranked[0]

@@ -81,8 +81,13 @@ def test_viewer_page_has_groups_clipping_and_tract_note():
     script = (ROOT / "web" / "static" / "viewer.js").read_text(encoding="utf-8")
     assert "GLTFLoader" in script
     assert "OrbitControls" in script
+    assert "CSS2DRenderer" in script
+    assert "tumor_location" in script
     assert "Tracts are atlas-estimated, not patient tractography." in html
+    assert "Hovered only" in html and 'id="label-mode"' in html
+    assert 'id="screenshot"' in html
     assert "Tumor" in script and "Anatomy" in script and "Tracts" in script
+    assert "Tumor focus" in script and "Tumor + Tracts" in script
     assert "depthWrite" in script
     assert "enhancing" in script and "renderOrder" in script
     page = create_app().test_client().get("/viewer")

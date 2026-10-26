@@ -43,6 +43,17 @@ BRAIN_TAUBIN_ITERS = 30
 BRAIN_FACE_BUDGET = 150_000
 TUMOR_DILATION_VOXELS = 2
 
+# Cortex is smoothed enough to look anatomical. A higher sigma would round
+# neighbouring parcels into each other. Deep nuclei use a smaller sigma so the
+# surface does not shrink off the structure.
+CORTEX_SIGMA = 1.0
+DEEP_SIGMA = 0.6
+DEFAULT_STRUCTURE_SIGMA = 0.7
+MIN_STRUCTURE_VOXELS = 50
+_DEEP_LEGENDS = frozenset(
+    {"Thalamus", "Caudate", "Putamen", "Pallidum", "Hippocampus", "Amygdala"}
+)
+
 # name -> SynthSeg / FreeSurfer label ids (left and right combined)
 SYNTHSEG_STRUCTURES = {
     "lateral_ventricles": (4, 5, 43, 44),
@@ -52,14 +63,6 @@ SYNTHSEG_STRUCTURES = {
     "basal_ganglia": (11, 12, 13, 26, 50, 51, 52, 58),
 }
 
-ANATOMY_COLORS = {
-    "brain": (180, 170, 160, 40),
-    "lateral_ventricles": (80, 170, 220, 200),
-    "brainstem": (200, 160, 140, 220),
-    "cerebellum": (190, 140, 120, 220),
-    "thalamus": (160, 90, 160, 220),
-    "basal_ganglia": (90, 160, 120, 220),
-}
 
 
 def mesh_brain_surface(brain_mask, affine):
@@ -115,6 +118,68 @@ def cleaned_structure_masks(synthseg, tumor_label, dilation_voxels=TUMOR_DILATIO
             int(dilation_voxels),
         )
     return masks, removed
+
+
+def structure_sigma(structure) -> float:
+    """Smoothing width for one parcellation label."""
+    if structure.group == "Cortex":
+        return CORTEX_SIGMA
+    if structure.legend_name in _DEEP_LEGENDS:
+        return DEEP_SIGMA
+    return DEFAULT_STRUCTURE_SIGMA
+
+
+def centroid_mm(mask, affine) -> list[float]:
+    """Mean voxel of ``mask``, mapped through ``affine`` into millimeters."""
+    coords = np.argwhere(np.asarray(mask, dtype=bool))
+    if len(coords) == 0:
+        return [0.0, 0.0, 0.0]
+    center = coords.mean(axis=0)
+    hom = np.array([center[0], center[1], center[2], 1.0], dtype=np.float64)
+    world = np.asarray(affine, dtype=np.float64) @ hom
+    return [float(world[0]), float(world[1]), float(world[2])]
+
+
+def ensure_scene_group(scene, group):
+    """Create an empty parent node so glTF export can group meshes under it."""
+    if group is None:
+        return
+    if group not in scene.graph.transforms.parents:
+        scene.graph.update(frame_to=group, matrix=np.eye(4))
+
+
+def mesh_parcellation_labels(parc, affine, *, min_voxels=MIN_STRUCTURE_VOXELS):
+    """Mesh every known parcellation label with ``mesh_from_mask``.
+
+    Cortex uses sigma 1.0. Thalamus, caudate, putamen, pallidum, hippocampus,
+    and amygdala use sigma 0.6. Other labels use sigma 0.7. Labels under
+    ``min_voxels`` are logged and skipped. Each kept mesh is checked against
+    its voxel volume.
+
+    Yields ``(structure, mask, mesh)``.
+    """
+    from recon.evaluate import check_mesh_volume
+    from recon.labels import rgba, structures_in_volume
+
+    for structure, mask in structures_in_volume(parc):
+        voxels = int(np.count_nonzero(mask))
+        if voxels < int(min_voxels):
+            logger.info(
+                "Skipping %s (label %s, %s): %d voxels is under %d",
+                structure.mesh_name,
+                structure.label_id,
+                structure.group,
+                voxels,
+                int(min_voxels),
+            )
+            continue
+        mesh = mesh_from_mask(mask, affine, sigma=structure_sigma(structure))
+        if mesh is None:
+            logger.info("Skipping %s: mesh_from_mask returned no surface", structure.mesh_name)
+            continue
+        mesh.visual.face_colors = rgba(structure)
+        check_mesh_volume(mesh, mask, affine, structure.mesh_name)
+        yield structure, mask, mesh
 
 
 def mesh_synthseg_structures(synthseg, tumor_label, affine):
@@ -571,15 +636,24 @@ def parcellate_case(
 
 
 def add_anatomy_meshes(scene, affine, tumor_label, brain_mask=None, synthseg=None):
-    """Add the brain shell and SynthSeg meshes onto an existing scene.
+    """Add the brain shell and one mesh per anatomical label.
 
-    Returns the per-structure removed-voxel counts (empty if no parcellation).
+    Names and colors come from ``recon.labels``. Left and right stay separate.
+    Returns the per-label removed-voxel counts (empty if no parcellation).
     """
+    from recon.labels import BRAIN, rgba
+
     if brain_mask is not None:
         brain = mesh_brain_surface(brain_mask, affine)
         if brain is not None:
-            brain.visual.face_colors = ANATOMY_COLORS["brain"]
-            scene.add_geometry(brain, geom_name="brain", node_name="brain")
+            brain.visual.face_colors = rgba(BRAIN)
+            ensure_scene_group(scene, BRAIN.group)
+            scene.add_geometry(
+                brain,
+                geom_name=BRAIN.mesh_name,
+                node_name=BRAIN.mesh_name,
+                parent_node_name=BRAIN.group,
+            )
     else:
         logger.info("include_anatomy: no brain mask, skipping the outer shell")
 
@@ -587,10 +661,13 @@ def add_anatomy_meshes(scene, affine, tumor_label, brain_mask=None, synthseg=Non
         logger.info("include_anatomy: no SynthSeg parcellation, skipping structures")
         return {}
 
-    meshes, removed = mesh_synthseg_structures(synthseg, tumor_label, affine)
-    for name, mesh in meshes.items():
-        if mesh is None:
-            continue
-        mesh.visual.face_colors = ANATOMY_COLORS[name]
-        scene.add_geometry(mesh, geom_name=name, node_name=name)
+    cleaned, removed = excise_tumor(synthseg, tumor_label)
+    for structure, _mask, mesh in mesh_parcellation_labels(cleaned, affine):
+        ensure_scene_group(scene, structure.group)
+        scene.add_geometry(
+            mesh,
+            geom_name=structure.mesh_name,
+            node_name=structure.mesh_name,
+            parent_node_name=structure.group,
+        )
     return removed

@@ -13,7 +13,9 @@ import trimesh
 from scipy import ndimage
 from skimage import measure
 
-SHELL_NAMES = ("edema", "core", "enhancing")
+from recon.labels import CORE, EDEMA, ENHANCING, rgba
+
+SHELL_NAMES = (EDEMA, CORE, ENHANCING)
 
 
 class MeshCheck(NamedTuple):
@@ -64,15 +66,31 @@ def region_shells(label) -> dict[str, np.ndarray]:
 
     regions = regions_from_label(label)
     return {
-        "edema": regions["WT"],
-        "core": regions["TC"],
-        "enhancing": regions["ET"],
+        EDEMA: regions["WT"],
+        CORE: regions["TC"],
+        ENHANCING: regions["ET"],
     }
+
+
+def _paint(mesh, name):
+    if mesh is not None:
+        mesh.visual.face_colors = rgba(name)
+    return mesh
 
 
 def mesh_shells(label, affine, **kwargs) -> dict[str, trimesh.Trimesh | None]:
     """One closed shell per nested region. Empty regions are ``None``."""
     return {
-        name: mesh_from_mask(mask, affine, **kwargs)
+        name: _paint(mesh_from_mask(mask, affine, **kwargs), name)
         for name, mask in region_shells(label).items()
     }
+
+
+def iter_parcellation_meshes(parc, affine, **kwargs):
+    """Mesh each known anatomical label.
+
+    Sigma and the 50-voxel cutoff live in ``recon.anatomy.mesh_parcellation_labels``.
+    """
+    from recon.anatomy import mesh_parcellation_labels
+
+    yield from mesh_parcellation_labels(parc, affine)

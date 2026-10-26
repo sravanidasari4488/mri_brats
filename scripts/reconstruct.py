@@ -41,11 +41,19 @@ def main(argv=None) -> None:
     parser.add_argument("--case", type=Path, required=True, help="BraTS case folder (t1n, t1c, t2w, t2f, seg)")
     parser.add_argument("--anatomy", action="store_true", help="Add the brain shell and SynthSeg structures")
     parser.add_argument("--tracts", action="store_true", help="Warp and mesh the JHU atlas tracts")
-    parser.add_argument("--checkpoint", type=Path, default=None, help="SegResNet checkpoint. Default: BRATS_CHECKPOINT or the smoke checkpoint")
+    parser.add_argument("--model", choices=("ours", "abhinav_v3"), default="ours", help="ours keeps the local preprocessing. abhinav_v3 uses the teammate checkpoint and its validation preprocessing")
+    parser.add_argument("--checkpoint", type=Path, default=None, help="SegResNet checkpoint. Default: BRATS_CHECKPOINT or the smoke checkpoint; abhinav_v3 uses checkpoints/brats_scale_full/best_model.pt")
     parser.add_argument("--synthseg", type=Path, default=None, help="SynthSeg parcellation NIfTI. Default: *synthseg* in the case folder")
     parser.add_argument("--output", type=Path, default=None, help="Output root. Default: outputs/")
     args = parser.parse_args(argv)
-    checkpoint = args.checkpoint if args.checkpoint is not None else default_checkpoint()
+    if args.checkpoint is not None:
+        checkpoint = args.checkpoint
+    elif args.model == "abhinav_v3":
+        from recon.infer import resolve_checkpoint
+
+        checkpoint = resolve_checkpoint(args.model)
+    else:
+        checkpoint = default_checkpoint()
     manifest = build_scene(
         args.case,
         anatomy=args.anatomy,
@@ -53,6 +61,7 @@ def main(argv=None) -> None:
         checkpoint=checkpoint,
         output_root=args.output,
         synthseg=args.synthseg,
+        model=args.model,
     )
     root = args.output if args.output is not None else default_output_root()
     print(f"wrote {root / manifest['case_id']}", flush=True)

@@ -1,8 +1,11 @@
-"""Hierarchy, component removal, ET-to-necrosis, and the yaml config."""
+"""Hierarchy, component removal, ET-to-necrosis, channel order, and the yaml config."""
+
+import importlib
+import itertools
 
 import numpy as np
 
-from recon.postprocess import PostConfig, brain_mask_from_image, postprocess
+from recon.postprocess import PostConfig, brain_mask_from_image, config_path_for, postprocess
 
 
 def test_yaml_loads_region_cutoffs():
@@ -76,3 +79,56 @@ def test_et_kept_when_large_enough():
     assert label[6, 6, 5] == 3
     assert label[4, 4, 4] == 1
     assert label[3, 3, 3] == 2
+
+
+def test_shuffled_channel_order_gives_the_same_label_map():
+    infer = importlib.import_module("recon.infer")
+    rng = np.random.default_rng(0)
+    shape = (16, 16, 16)
+    heads = {"ET": np.zeros(shape, np.float32), "TC": np.zeros(shape, np.float32), "WT": np.zeros(shape, np.float32)}
+    heads["WT"][2:12, 2:12, 2:10] = 0.7
+    heads["TC"][4:10, 4:10, 4:8] = 0.8
+    heads["ET"][5:8, 5:8, 5:7] = 0.9
+    for head in heads.values():
+        head += rng.uniform(0.0, 0.3, shape).astype(np.float32)
+    brain = np.ones(shape, dtype=bool)
+    # ET 0.85, TC 0.75, WT 0.65: the background (< 0.3) never passes, every
+    # region does, and a head scored under another head's name moves voxels.
+    config = PostConfig(0.85, 0.75, 0.65, 4, 4, 20, 1, 1)
+
+    original = tuple(infer.CHANNEL_ORDER)
+    reference = postprocess(np.stack([heads[name] for name in original]), brain, config)
+    assert set(np.unique(reference)) == {0, 1, 2, 3}
+
+    try:
+        for order in itertools.permutations(("ET", "TC", "WT")):
+            probs = np.stack([heads[name] for name in order])
+            passed = postprocess(probs, brain, config, channel_order=order)
+            assert np.array_equal(passed, reference), order
+            infer.CHANNEL_ORDER = order
+            patched = postprocess(probs, brain, config)
+            assert np.array_equal(patched, reference), order
+    finally:
+        infer.CHANNEL_ORDER = original
+
+    try:
+        postprocess(np.stack([heads["ET"]] * 3), brain, config, channel_order=("ET", "ET", "WT"))
+        raise AssertionError("expected ValueError for a repeated head")
+    except ValueError:
+        pass
+
+
+def test_config_paths_are_per_model():
+    assert config_path_for("ours").name == "postprocess_ours.yaml"
+    assert config_path_for("abhinav_v3").name == "postprocess_abhinav_v3.yaml"
+    assert config_path_for("ours").is_file()
+
+
+if __name__ == "__main__":
+    test_yaml_loads_region_cutoffs()
+    test_brain_mask_closes_and_fills_holes()
+    test_hierarchy_component_filter_and_et_to_necrosis()
+    test_et_kept_when_large_enough()
+    test_shuffled_channel_order_gives_the_same_label_map()
+    test_config_paths_are_per_model()
+    print("postprocess ok")

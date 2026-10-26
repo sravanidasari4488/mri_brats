@@ -197,13 +197,13 @@ def _flair(image) -> np.ndarray:
     return np.asarray(array, dtype=np.float32)
 
 
-def evaluate_case(case_id, image, label, probs, spacing, affine, out_dir: Path, config=None) -> dict:
+def evaluate_case(case_id, image, label, probs, spacing, affine, out_dir: Path, config=None, model="ours") -> dict:
     """Score one case and write its four PNGs under ``out_dir/images/<case_id>``."""
     if config is None:
-        config = PostConfig.from_yaml()
+        config = PostConfig.for_model(model)
     brain = brain_mask_from_image(image, config)
     prediction = postprocess(np.asarray(probs, dtype=np.float32), brain, config)
-    regions = score_case(prediction, label, spacing)
+    regions = score_case(prediction, label, spacing, case_id=case_id, model=model)
     meshes, errors, watertight = mesh_volume_errors(prediction, affine)
     folder = out_dir / "images" / case_id
     center = tumor_center(label, prediction)
@@ -318,30 +318,53 @@ def write_report(cases: list[dict], path: Path) -> Path:
     return path
 
 
-def _load_cached(cache_dir: Path, case_id: str):
-    """Cached probabilities in ET, TC, WT order, or None when this case was not cached."""
+def _load_cached(cache_dir: Path, case_id: str, model: str = "ours"):
+    """Cached probabilities in ``CHANNEL_ORDER``, or None when this case was not cached."""
     path = cache_dir / f"{case_id}.npz"
     if not path.is_file():
         return None
-    from recon.infer import CHANNEL_ORDER
+    from recon.infer import CHANNEL_ORDER, reorder_probabilities
 
     with np.load(path, allow_pickle=False) as data:
         probs = np.asarray(data["probs"], dtype=np.float32)
+        if "model" in data.files and str(data["model"]) != model:
+            raise ValueError(f"{path.name} was cached with model {str(data['model'])!r}, not {model!r}")
         if "channel_order" in data.files:
             order = tuple(str(name) for name in np.asarray(data["channel_order"]).reshape(-1))
-            if order != CHANNEL_ORDER:
-                probs = probs[[order.index(name) for name in CHANNEL_ORDER]]
-        return probs
+        else:
+            order = CHANNEL_ORDER
+    return reorder_probabilities(probs, order)
 
 
-def run(data_dir: Path, out_dir: Path, num_cases: int, cache_dir: Path, checkpoint: Path, config=None) -> Path:
-    from scripts.cache_probs import _load_case, _training_transform, held_out_cases
+def default_cache_dir(model: str) -> Path:
+    return ROOT / "caches" / "val_probs_abhinav_v3" if model == "abhinav_v3" else _DEFAULT_CACHE
+
+
+def default_out_dir(model: str) -> Path:
+    return ROOT / "reports" / "qa_abhinav_v3" if model == "abhinav_v3" else _DEFAULT_OUT
+
+
+def run(
+    data_dir: Path,
+    out_dir: Path,
+    num_cases: int,
+    cache_dir: Path,
+    checkpoint: Path,
+    config=None,
+    model_kind: str = "ours",
+    case_list: Path | None = None,
+) -> Path:
+    from recon.infer import load_model, predict_probs, roi_for
+    from scripts.cache_probs import _load_case, _training_transform, select_cases
 
     if not data_dir.is_dir():
         raise FileNotFoundError(
             f"BraTS directory not found: {data_dir}. Point --data-dir at the processed NIfTI cases."
         )
-    selected, _train = held_out_cases(data_dir, num_cases)
+    selected, source = select_cases(data_dir, model_kind, num_cases=num_cases, case_list=case_list)
+    print(f"model={model_kind} {len(selected)} cases, {', '.join(source)}", flush=True)
+    if config is None:
+        config = PostConfig.for_model(model_kind)
     transform = None
     model = None
     records = []
@@ -349,18 +372,14 @@ def run(data_dir: Path, out_dir: Path, num_cases: int, cache_dir: Path, checkpoi
     for index, case_dir in enumerate(selected, start=1):
         print(f"[{index}/{len(selected)}] {case_dir.name}", flush=True)
         if transform is None:
-            transform = _training_transform()
+            transform = _training_transform(model_kind)
         image, label, spacing = _load_case(case_dir, transform)
-        probs = _load_cached(cache_dir, case_dir.name)
+        probs = _load_cached(cache_dir, case_dir.name, model_kind)
         if probs is None:
-            from recon.infer import predict_probs
-
             if model is None:
-                from recon.infer import load_model
-
-                model = load_model(checkpoint, None)
+                model = load_model(checkpoint, None, model_kind)
             print("  no cache, running inference", flush=True)
-            probs = predict_probs(model, image)
+            probs = predict_probs(model, image, roi_for(model_kind), model_name=model_kind)
         if probs.shape[1:] != label.shape:
             raise RuntimeError(f"{case_dir.name}: probs {probs.shape} vs label {label.shape}")
         records.append(
@@ -373,6 +392,7 @@ def run(data_dir: Path, out_dir: Path, num_cases: int, cache_dir: Path, checkpoi
                 _affine(image, spacing),
                 out_dir,
                 config,
+                model_kind,
             )
         )
     report = write_report(records, out_dir / "index.html")
@@ -385,12 +405,30 @@ def run(data_dir: Path, out_dir: Path, num_cases: int, cache_dir: Path, checkpoi
 def main() -> None:
     parser = argparse.ArgumentParser(description="HTML QA report for held-out validation cases")
     parser.add_argument("--data-dir", type=Path, default=_DEFAULT_DATA)
-    parser.add_argument("--cache-dir", type=Path, default=_DEFAULT_CACHE)
-    parser.add_argument("--checkpoint", type=Path, default=_DEFAULT_CKPT)
-    parser.add_argument("--out-dir", type=Path, default=_DEFAULT_OUT)
+    parser.add_argument("--cache-dir", type=Path, default=None, help="Default: caches/val_probs or caches/val_probs_abhinav_v3")
+    parser.add_argument("--checkpoint", type=Path, default=None)
+    parser.add_argument("--model", choices=("ours", "abhinav_v3"), default="ours")
+    parser.add_argument("--case-list", type=Path, default=None, help="Default for abhinav_v3: splits/abhinav_heldout.txt")
+    parser.add_argument("--out-dir", type=Path, default=None, help="Default: reports/qa or reports/qa_abhinav_v3")
     parser.add_argument("--num-cases", type=int, default=10)
     args = parser.parse_args()
-    run(args.data_dir, args.out_dir, args.num_cases, args.cache_dir, args.checkpoint)
+    checkpoint = args.checkpoint
+    if checkpoint is None:
+        if args.model == "abhinav_v3":
+            from recon.infer import resolve_checkpoint
+
+            checkpoint = resolve_checkpoint(args.model)
+        else:
+            checkpoint = _DEFAULT_CKPT
+    run(
+        args.data_dir,
+        args.out_dir or default_out_dir(args.model),
+        args.num_cases,
+        args.cache_dir or default_cache_dir(args.model),
+        checkpoint,
+        model_kind=args.model,
+        case_list=args.case_list,
+    )
 
 
 if __name__ == "__main__":

@@ -8,8 +8,14 @@ The saved config is the one with the highest mean precision whose mean Dice
 (WT, TC, ET) is at least the raw 0.5-threshold Dice minus 0.01. Raw scores
 threshold each head at 0.5 and do not apply hierarchy or component removal.
 
+``--model abhinav_v3`` reads ``caches/val_probs_abhinav_v3``, refuses any
+cached case from that checkpoint's training list, and writes
+``configs/postprocess_abhinav_v3.yaml``. ``--model ours`` writes
+``configs/postprocess_ours.yaml``.
+
 Example:
     python scripts/tune_postprocess.py
+    python scripts/tune_postprocess.py --model abhinav_v3
 """
 
 from __future__ import annotations
@@ -17,6 +23,7 @@ from __future__ import annotations
 import argparse
 import csv
 import itertools
+import json
 import sys
 from pathlib import Path
 
@@ -30,25 +37,38 @@ from recon.evaluate import (  # noqa: E402
     REGION_NAMES,
     aggregate_scores,
     as_region_masks,
+    check_reportable,
     choose_operating_point,
+    evaluation_case_ids,
     region_overlap,
     score_case,
 )
-from recon.infer import CHANNEL_ORDER  # noqa: E402
-from recon.postprocess import PostConfig, postprocess  # noqa: E402
+from recon.infer import CHANNEL_ORDER, channel_index, reorder_probabilities  # noqa: E402
+from recon.postprocess import PostConfig, config_path_for, postprocess  # noqa: E402
+from recon.splits import ABHINAV_V3, MODEL_NAMES, OURS, model_name  # noqa: E402
 
-_DEFAULT_CACHE = ROOT / "caches" / "val_probs"
-_DEFAULT_CONFIG = ROOT / "configs" / "postprocess.yaml"
-_DEFAULT_REPORT = ROOT / "reports" / "postprocess_ablation.csv"
+_HEADS = ("ET", "TC", "WT")
 
 THRESHOLD_VALUES = (0.4, 0.5, 0.6, 0.7)
-# (ET, TC, WT) minimum 26-connected component sizes, in voxels.
+# Minimum 26-connected component sizes, in voxels.
 MIN_COMPONENT_GRID = (
-    (0, 0, 0),
-    (20, 50, 100),
-    (50, 150, 300),
-    (100, 300, 600),
+    {"ET": 0, "TC": 0, "WT": 0},
+    {"ET": 20, "TC": 50, "WT": 100},
+    {"ET": 50, "TC": 150, "WT": 300},
+    {"ET": 100, "TC": 300, "WT": 600},
 )
+
+
+def default_cache_dir(model: str = OURS) -> Path:
+    if model_name(model) == ABHINAV_V3:
+        return ROOT / "caches" / "val_probs_abhinav_v3"
+    return ROOT / "caches" / "val_probs"
+
+
+def default_report_path(model: str = OURS) -> Path:
+    if model_name(model) == ABHINAV_V3:
+        return ROOT / "reports" / "postprocess_ablation_abhinav_v3.csv"
+    return ROOT / "reports" / "postprocess_ablation.csv"
 
 
 class CachedCase:
@@ -76,12 +96,23 @@ def _crop(probs, label, brain, spacing):
     return probs[(slice(None),) + sl], label[sl], brain[sl], spacing
 
 
-def load_cached_cases(cache_dir: Path) -> list[CachedCase]:
+def _check_cache_model(cache_dir: Path, model: str) -> None:
+    manifest = cache_dir / "manifest.json"
+    if not manifest.is_file():
+        return
+    cached = json.loads(manifest.read_text(encoding="utf-8")).get("model", OURS)
+    if cached != model:
+        raise ValueError(f"{cache_dir} was cached with model {cached!r}, not {model!r}")
+
+
+def load_cached_cases(cache_dir: Path, model: str = OURS) -> list[CachedCase]:
+    model = model_name(model)
     files = sorted(path for path in cache_dir.glob("*.npz") if path.is_file())
     if not files:
         raise FileNotFoundError(
             f"No cached probabilities in {cache_dir}. Run scripts/cache_probs.py first."
         )
+    _check_cache_model(cache_dir, model)
     cases = []
     for path in files:
         with np.load(path, allow_pickle=False) as data:
@@ -94,33 +125,48 @@ def load_cached_cases(cache_dir: Path) -> list[CachedCase]:
             else:
                 order = CHANNEL_ORDER
             case_id = str(data["case_id"]) if "case_id" in data.files else path.stem
-        if order != tuple(CHANNEL_ORDER):
-            permute = [order.index(name) for name in CHANNEL_ORDER]
-            probs = probs[permute]
+            cached_model = str(data["model"]) if "model" in data.files else None
+        if cached_model is not None and cached_model != model:
+            raise ValueError(f"{path.name} was cached with model {cached_model!r}, not {model!r}")
+        probs = reorder_probabilities(probs, order)
         probs, label, brain, spacing = _crop(probs, label, brain, spacing)
         cases.append(CachedCase(case_id, probs, label, brain, spacing))
+    check_reportable([case.case_id for case in cases], model)
+    heldout = evaluation_case_ids(model)
+    if heldout is not None:
+        missing = sorted(set(heldout) - {case.case_id for case in cases})
+        if missing:
+            print(f"{len(missing)} of {len(heldout)} held-out cases are not cached yet", flush=True)
     return cases
 
 
 def raw_region_masks(probs, brain, threshold=0.5) -> dict[str, np.ndarray]:
     """Threshold each head at ``threshold``. No hierarchy and no component filter."""
-    masks = {}
-    for index, name in enumerate(CHANNEL_ORDER):
-        masks[name] = (np.asarray(probs[index]) > threshold) & brain
-    return masks
+    return {
+        name: (np.asarray(probs[channel_index(name)]) > threshold) & brain
+        for name in _HEADS
+    }
 
 
-def _config(base: PostConfig, thresholds, min_voxels) -> PostConfig:
+def _config(base: PostConfig, thresholds: dict, min_voxels: dict) -> PostConfig:
     return PostConfig(
-        threshold_et=float(thresholds[0]),
-        threshold_tc=float(thresholds[1]),
-        threshold_wt=float(thresholds[2]),
-        min_voxels_et=int(min_voxels[0]),
-        min_voxels_tc=int(min_voxels[1]),
-        min_voxels_wt=int(min_voxels[2]),
+        threshold_et=float(thresholds["ET"]),
+        threshold_tc=float(thresholds["TC"]),
+        threshold_wt=float(thresholds["WT"]),
+        min_voxels_et=int(min_voxels["ET"]),
+        min_voxels_tc=int(min_voxels["TC"]),
+        min_voxels_wt=int(min_voxels["WT"]),
         et_min_voxels=base.et_min_voxels,
         brain_closing_iterations=base.brain_closing_iterations,
     )
+
+
+def _min_voxels(config: PostConfig) -> dict:
+    return {name: config.min_voxels(name) for name in _HEADS}
+
+
+def _thresholds(config: PostConfig) -> dict:
+    return {name: config.threshold(name) for name in _HEADS}
 
 
 def search_configs(base: PostConfig) -> list[PostConfig]:
@@ -128,15 +174,15 @@ def search_configs(base: PostConfig) -> list[PostConfig]:
     configs = []
     for threshold in THRESHOLD_VALUES:
         for min_voxels in MIN_COMPONENT_GRID:
-            configs.append(_config(base, (threshold, threshold, threshold), min_voxels))
+            configs.append(_config(base, {name: threshold for name in _HEADS}, min_voxels))
     return configs
 
 
-def threshold_grid(base: PostConfig, min_voxels) -> list[PostConfig]:
-    """Every ET/TC/WT threshold in 0.4–0.7 at one component-size triple."""
+def threshold_grid(base: PostConfig, min_voxels: dict) -> list[PostConfig]:
+    """Every ET/TC/WT threshold in 0.4–0.7 at one component-size setting."""
     configs = []
-    for thresholds in itertools.product(THRESHOLD_VALUES, repeat=3):
-        configs.append(_config(base, thresholds, min_voxels))
+    for values in itertools.product(THRESHOLD_VALUES, repeat=len(_HEADS)):
+        configs.append(_config(base, dict(zip(_HEADS, values)), min_voxels))
     return configs
 
 
@@ -189,12 +235,12 @@ def evaluate_raw(cases: list[CachedCase], threshold=0.5) -> dict:
     return {"mean_dice": mean_dice, "mean_precision": mean_precision, "scores": scores}
 
 
-def full_summary(cases: list[CachedCase], prediction_for_case) -> dict:
+def full_summary(cases: list[CachedCase], prediction_for_case, model: str = OURS) -> dict:
     scored = []
     for case in cases:
         prediction = prediction_for_case(case)
-        scored.append(score_case(prediction, case.label, case.spacing))
-    return aggregate_scores(scored)
+        scored.append(score_case(prediction, case.label, case.spacing, case_id=case.case_id, model=model))
+    return aggregate_scores(scored, model=model)
 
 
 def _write_report(path: Path, raw: dict, post: dict, config: PostConfig) -> None:
@@ -218,14 +264,8 @@ def _write_report(path: Path, raw: dict, post: dict, config: PostConfig) -> None
     ]
     rows = []
     for variant, summary, thresholds, mins, et_min in (
-        ("raw", raw, (0.5, 0.5, 0.5), ("", "", ""), ""),
-        (
-            "post",
-            post,
-            (config.threshold_et, config.threshold_tc, config.threshold_wt),
-            (config.min_voxels_et, config.min_voxels_tc, config.min_voxels_wt),
-            config.et_min_voxels,
-        ),
+        ("raw", raw, {name: 0.5 for name in _HEADS}, {name: "" for name in _HEADS}, ""),
+        ("post", post, _thresholds(config), _min_voxels(config), config.et_min_voxels),
     ):
         for region in list(REGION_NAMES) + ["mean"]:
             if region == "mean":
@@ -248,12 +288,12 @@ def _write_report(path: Path, raw: dict, post: dict, config: PostConfig) -> None
                     "recall": f"{metrics['recall']:.6f}",
                     "lesion_fp": metrics["lesion_fp"],
                     "n_gt_empty_et_but_pred": summary["n_gt_empty_et_but_pred"],
-                    "threshold_et": thresholds[0],
-                    "threshold_tc": thresholds[1],
-                    "threshold_wt": thresholds[2],
-                    "min_voxels_et": mins[0],
-                    "min_voxels_tc": mins[1],
-                    "min_voxels_wt": mins[2],
+                    "threshold_et": thresholds["ET"],
+                    "threshold_tc": thresholds["TC"],
+                    "threshold_wt": thresholds["WT"],
+                    "min_voxels_et": mins["ET"],
+                    "min_voxels_tc": mins["TC"],
+                    "min_voxels_wt": mins["WT"],
                     "et_min_voxels": et_min,
                 }
             )
@@ -263,10 +303,17 @@ def _write_report(path: Path, raw: dict, post: dict, config: PostConfig) -> None
         writer.writerows(rows)
 
 
-def run(cache_dir: Path, config_path: Path, report_path: Path, margin: float = 0.01) -> PostConfig | None:
-    cases = load_cached_cases(cache_dir)
-    base = PostConfig.from_yaml(config_path)
-    print(f"cases={len(cases)} margin={margin}", flush=True)
+def run(
+    cache_dir: Path,
+    config_path: Path,
+    report_path: Path,
+    margin: float = 0.01,
+    model: str = OURS,
+) -> PostConfig | None:
+    model = model_name(model)
+    cases = load_cached_cases(cache_dir, model)
+    base = PostConfig.from_yaml(config_path) if Path(config_path).is_file() else PostConfig()
+    print(f"model={model} cases={len(cases)} margin={margin}", flush=True)
     raw_fast = evaluate_raw(cases)
     print(
         f"raw 0.5  mean_dice={raw_fast['mean_dice']:.4f}  mean_precision={raw_fast['mean_precision']:.4f}",
@@ -285,14 +332,9 @@ def run(cache_dir: Path, config_path: Path, report_path: Path, margin: float = 0
         )
     winner = choose_operating_point(scored, raw_fast["mean_dice"], margin)
     if winner is None:
-        size_for_grid = (0, 0, 0)
+        size_for_grid = MIN_COMPONENT_GRID[0]
     else:
-        chosen_size = winner["config"]
-        size_for_grid = (
-            chosen_size.min_voxels_et,
-            chosen_size.min_voxels_tc,
-            chosen_size.min_voxels_wt,
-        )
+        size_for_grid = _min_voxels(winner["config"])
     already = {
         (item["config"].threshold_et, item["config"].threshold_tc, item["config"].threshold_wt,
          item["config"].min_voxels_et, item["config"].min_voxels_tc, item["config"].min_voxels_wt)
@@ -317,7 +359,7 @@ def run(cache_dir: Path, config_path: Path, report_path: Path, margin: float = 0
     if winner is None:
         print(
             f"No config kept mean Dice within {margin} of raw {raw_fast['mean_dice']:.4f}. "
-            "configs/postprocess.yaml was left unchanged.",
+            f"{config_path} was left unchanged.",
             flush=True,
         )
         return None
@@ -326,10 +368,12 @@ def run(cache_dir: Path, config_path: Path, report_path: Path, margin: float = 0
     raw_summary = full_summary(
         cases,
         lambda case: raw_region_masks(np.asarray(case.probs, dtype=np.float32), case.brain, 0.5),
+        model,
     )
     post_summary = full_summary(
         cases,
         lambda case: postprocess(np.asarray(case.probs, dtype=np.float32), case.brain, chosen),
+        model,
     )
     chosen.write_yaml(config_path)
     _write_report(report_path, raw_summary, post_summary, chosen)
@@ -346,12 +390,19 @@ def run(cache_dir: Path, config_path: Path, report_path: Path, margin: float = 0
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Tune BraTS post-processing on cached validation probabilities")
-    parser.add_argument("--cache-dir", type=Path, default=_DEFAULT_CACHE)
-    parser.add_argument("--config", type=Path, default=_DEFAULT_CONFIG)
-    parser.add_argument("--report", type=Path, default=_DEFAULT_REPORT)
+    parser.add_argument("--model", choices=MODEL_NAMES, default=OURS)
+    parser.add_argument("--cache-dir", type=Path, default=None, help="Default: caches/val_probs or caches/val_probs_abhinav_v3")
+    parser.add_argument("--config", type=Path, default=None, help="Default: configs/postprocess_<model>.yaml")
+    parser.add_argument("--report", type=Path, default=None)
     parser.add_argument("--margin", type=float, default=0.01)
     args = parser.parse_args()
-    run(args.cache_dir, args.config, args.report, args.margin)
+    run(
+        args.cache_dir or default_cache_dir(args.model),
+        args.config or config_path_for(args.model),
+        args.report or default_report_path(args.model),
+        args.margin,
+        args.model,
+    )
 
 
 if __name__ == "__main__":

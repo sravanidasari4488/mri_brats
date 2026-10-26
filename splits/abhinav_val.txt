@@ -1,0 +1,22 @@
+# Validation cases used to pick best_model.pt. Not trained on, but used for checkpoint selection.
+# Source: abhinavgadde1/MRI checkpoints/brats_scale_full/train_run_val_cases.txt (20 cases)
+BraTS20_Training_001
+BraTS20_Training_004
+BraTS20_Training_036
+BraTS20_Training_059
+BraTS20_Training_079
+BraTS20_Training_092
+BraTS20_Training_114
+BraTS20_Training_160
+BraTS20_Training_162
+BraTS20_Training_177
+BraTS20_Training_213
+BraTS20_Training_235
+BraTS20_Training_255
+BraTS20_Training_274
+BraTS20_Training_295
+BraTS20_Training_306
+BraTS20_Training_310
+BraTS20_Training_322
+BraTS20_Training_326
+BraTS20_Training_353

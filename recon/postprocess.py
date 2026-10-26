@@ -1,18 +1,22 @@
 """Post-processing: brain mask, hierarchy, small-component removal, ET rule.
 
-Probability channels are named by ``recon.infer.CHANNEL_ORDER`` (ET, TC, WT).
-Thresholds and size cutoffs come from ``configs/postprocess.yaml`` via
-``PostConfig``.
+Probability channels are looked up by name in ``recon.infer.CHANNEL_ORDER``.
+Thresholds and size cutoffs come from ``configs/postprocess_<model>.yaml`` via
+``PostConfig``: ``postprocess_ours.yaml`` for the local SegResNet and
+``postprocess_abhinav_v3.yaml`` for the teammate checkpoint.
 """
 
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
 import yaml
 from scipy import ndimage
+
+from recon.splits import OURS, model_name
 
 CONN = np.ones((3, 3, 3), dtype=bool)  # 26-connectivity
 
@@ -24,8 +28,12 @@ def _yaml_number(value: float) -> str:
     return text if "." in text else f"{text}.0"
 
 
+def config_path_for(model: str = OURS) -> Path:
+    return Path(__file__).resolve().parents[1] / "configs" / f"postprocess_{model_name(model)}.yaml"
+
+
 def default_config_path() -> Path:
-    return Path(__file__).resolve().parents[1] / "configs" / "postprocess.yaml"
+    return config_path_for(OURS)
 
 
 @dataclass(frozen=True)
@@ -56,9 +64,22 @@ class PostConfig:
         }[region]
 
     @classmethod
-    def from_yaml(cls, path: str | Path | None = None) -> PostConfig:
-        """Load cutoffs from ``configs/postprocess.yaml`` (or ``path``)."""
-        config_path = Path(path) if path is not None else default_config_path()
+    def for_model(cls, model: str = OURS) -> PostConfig:
+        """``configs/postprocess_<model>.yaml``, or the untuned defaults when it is missing."""
+        path = config_path_for(model)
+        if path.is_file():
+            return cls.from_yaml(path)
+        warnings.warn(
+            f"{path.name} not found; using untuned defaults. "
+            f"Run scripts/tune_postprocess.py --model {model_name(model)}.",
+            stacklevel=2,
+        )
+        return cls()
+
+    @classmethod
+    def from_yaml(cls, path: str | Path | None = None, *, model: str = OURS) -> PostConfig:
+        """Load cutoffs from ``path``, default ``configs/postprocess_<model>.yaml``."""
+        config_path = Path(path) if path is not None else config_path_for(model)
         if not config_path.is_file():
             raise FileNotFoundError(f"Post-process config not found: {config_path}")
         with config_path.open("r", encoding="utf-8") as handle:
@@ -76,12 +97,12 @@ class PostConfig:
             brain_closing_iterations=int(raw["brain_closing_iterations"]),
         )
 
-    def write_yaml(self, path: str | Path | None = None) -> Path:
-        """Write this config back to ``configs/postprocess.yaml`` (or ``path``)."""
-        config_path = Path(path) if path is not None else default_config_path()
+    def write_yaml(self, path: str | Path | None = None, *, model: str = OURS) -> Path:
+        """Write this config to ``path``, default ``configs/postprocess_<model>.yaml``."""
+        config_path = Path(path) if path is not None else config_path_for(model)
         config_path.parent.mkdir(parents=True, exist_ok=True)
         text = (
-            "# SegResNet head thresholds. Probability channels follow CHANNEL_ORDER: ET, TC, WT.\n"
+            "# SegResNet head thresholds, keyed by region name (ET, TC, WT).\n"
             "# Updated by scripts/tune_postprocess.py.\n"
             "thresholds:\n"
             f"  ET: {_yaml_number(self.threshold_et)}\n"
@@ -122,10 +143,11 @@ def remove_small_components(mask, min_vox):
     return np.isin(lab, keep_ids)
 
 
-def postprocess(probs, brain_mask, config: PostConfig | None = None):
+def postprocess(probs, brain_mask, config: PostConfig | None = None, channel_order=None):
     """Threshold heads, enforce ET ⊂ TC ⊂ WT, drop specks, and apply the ET rule.
 
-    ``probs`` is ``(3, H, W, D)`` in ``CHANNEL_ORDER``. Labels are 1 = NCR,
+    ``probs`` is ``(3, H, W, D)``. Each head is found by name in
+    ``channel_order``, default ``CHANNEL_ORDER``. Labels are 1 = NCR,
     2 = ED, 3 = ET. When enhancing tumor is smaller than ``et_min_voxels``,
     it is cleared and those voxels stay necrotic core.
     """
@@ -133,14 +155,18 @@ def postprocess(probs, brain_mask, config: PostConfig | None = None):
         config = PostConfig.from_yaml()
     from recon.infer import CHANNEL_ORDER
 
-    if tuple(CHANNEL_ORDER) != _REGION_NAMES:
-        raise RuntimeError(f"Unsupported CHANNEL_ORDER {CHANNEL_ORDER}; expected {_REGION_NAMES}")
-    if np.shape(probs)[0] != len(CHANNEL_ORDER):
-        raise ValueError(f"Expected {len(CHANNEL_ORDER)} probability channels, got {np.shape(probs)[0]}")
+    order = tuple(CHANNEL_ORDER if channel_order is None else channel_order)
+    if sorted(order) != sorted(_REGION_NAMES):
+        raise ValueError(f"Channel order {order} must name each of {_REGION_NAMES} once")
+    if np.shape(probs)[0] != len(order):
+        raise ValueError(f"Expected {len(order)} probability channels, got {np.shape(probs)[0]}")
+
+    def idx(name):
+        return order.index(name)
 
     regions = {
-        name: (probs[index] > config.threshold(name)) & brain_mask
-        for index, name in enumerate(CHANNEL_ORDER)
+        name: (probs[idx(name)] > config.threshold(name)) & brain_mask
+        for name in _REGION_NAMES
     }
     wt = remove_small_components(regions["WT"], config.min_voxels("WT"))
     # enforce ET ⊂ TC ⊂ WT  (a voxel violating this cannot be correct)

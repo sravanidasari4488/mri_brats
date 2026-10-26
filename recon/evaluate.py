@@ -3,6 +3,10 @@
 Per-region scores use WT = {1, 2, 3}, TC = {1, 3}, ET = {3} (legacy 4 counts as ET).
 Dice is 1 when both the prediction and the ground truth are empty, and 0 when
 only one of them is. HD95 is the 95th percentile surface distance in millimeters.
+
+With ``model="abhinav_v3"`` every scored case needs a ``case_id``, and cases
+from that checkpoint's training list raise ``TrainingCaseError``. The default
+evaluation list is ``evaluation_case_ids(model)``.
 """
 
 from __future__ import annotations
@@ -11,8 +15,30 @@ import numpy as np
 from scipy import ndimage
 
 from recon.postprocess import CONN
+from recon.splits import (
+    OURS,
+    TrainingCaseError,
+    check_reportable,
+    heldout_case_ids,
+    model_name,
+    training_case_ids,
+)
 
 REGION_NAMES = ("WT", "TC", "ET")
+
+
+def evaluation_case_ids(model: str = OURS) -> list[str] | None:
+    """Held-out case ids for ``model``. ``None`` means use the local validation split."""
+    return heldout_case_ids(model)
+
+
+def _guard(case_ids, model: str) -> None:
+    if not training_case_ids(model):
+        return
+    ids = list(case_ids)
+    if any(case_id is None for case_id in ids):
+        raise TrainingCaseError(f"{model} metrics need a case_id for every case to rule out training cases")
+    check_reportable(ids, model)
 
 
 def check_mesh_volume(mesh, mask, affine, name=""):
@@ -118,8 +144,10 @@ def lesion_false_positives(pred, gt) -> int:
     return int(count - hit.size)
 
 
-def score_case(prediction, ground_truth, spacing=(1.0, 1.0, 1.0)) -> dict:
+def score_case(prediction, ground_truth, spacing=(1.0, 1.0, 1.0), *, case_id=None, model: str = OURS) -> dict:
     """Score one case. ``prediction`` / ``ground_truth`` are labels or region dicts."""
+    model = model_name(model)
+    _guard([case_id], model)
     pred = as_region_masks(prediction)
     gt = as_region_masks(ground_truth)
     metrics = {}
@@ -133,10 +161,12 @@ def score_case(prediction, ground_truth, spacing=(1.0, 1.0, 1.0)) -> dict:
             "lesion_fp": lesion_false_positives(pred[region], gt[region]),
         }
     metrics["gt_empty_et_but_pred"] = (not gt["ET"].any()) and bool(pred["ET"].any())
+    if case_id is not None:
+        metrics["case_id"] = str(case_id)
     return metrics
 
 
-def aggregate_scores(cases: list[dict]) -> dict:
+def aggregate_scores(cases: list[dict], *, model: str = OURS) -> dict:
     """Mean Dice / HD95 / precision / recall, summed lesion false positives.
 
     HD95 ignores cases where it is undefined (only one side empty).
@@ -145,6 +175,7 @@ def aggregate_scores(cases: list[dict]) -> dict:
     """
     if not cases:
         raise ValueError("No cases to aggregate")
+    _guard([case.get("case_id") for case in cases], model_name(model))
     summary = {}
     for region in REGION_NAMES:
         hd = np.array([case[region]["hd95_mm"] for case in cases], dtype=np.float64)

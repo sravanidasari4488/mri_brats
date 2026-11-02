@@ -1,0 +1,9 @@
+{
+  "case_id": "f2e25a637d706dcd05b3",
+  "template": "C:\\Users\\Sravani\\Desktop\\projects\\mri_brats\\atlases\\MNI152_T1_1mm.nii.gz",
+  "tumor_sha256": "786d3d17e9e3f9d18f7d39cfed4a8191f28b1d0e8c166bbb23b70a8558470e89",
+  "transforms": [
+    "00_tmp3gy68o4z1Warp.nii.gz",
+    "01_tmp3gy68o4z0GenericAffine.mat"
+  ]
+}

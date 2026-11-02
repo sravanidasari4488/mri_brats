@@ -1,0 +1,746 @@
+{
+  "case_id": "study_ff9c6c72e9d1",
+  "case_dir": "C:\\Users\\Sravani\\Desktop\\projects\\mri_brats\\outputs\\real\\study_ff9c6c72e9d1\\04_ready",
+  "model": "abhinav_v3",
+  "input_hash": "eabbab8628df86bd59fc",
+  "anatomy": true,
+  "postprocess": {
+    "threshold_et": 0.7,
+    "threshold_tc": 0.7,
+    "threshold_wt": 0.7,
+    "min_voxels_et": 100,
+    "min_voxels_tc": 300,
+    "min_voxels_wt": 600,
+    "et_min_voxels": 100,
+    "brain_closing_iterations": 2
+  },
+  "structures": {
+    "edema": {
+      "volume_cm3": 62.44899916833061,
+      "mesh_volume_cm3": 58.686554570464715,
+      "volume_error_pct": -6.024827696156127,
+      "watertight": true,
+      "color": [
+        245,
+        197,
+        66,
+        64
+      ],
+      "centroid_mm": [
+        -27.95332167852247,
+        -21.91836219164098,
+        54.307496931989846
+      ],
+      "source": "model",
+      "proximity": null,
+      "file": "edema.glb",
+      "short_name": "ED",
+      "full_name": "Edema",
+      "group": "Tumor",
+      "legend": "Edema",
+      "label_id": 2
+    },
+    "necrosis": {
+      "volume_cm3": 38.297999489963416,
+      "mesh_volume_cm3": 37.56860750217253,
+      "volume_error_pct": -1.9045172006491702,
+      "watertight": true,
+      "color": [
+        192,
+        57,
+        43,
+        255
+      ],
+      "centroid_mm": [
+        -30.471985110530696,
+        -33.53058024526656,
+        63.23142657248337
+      ],
+      "source": "model",
+      "proximity": null,
+      "file": "necrosis.glb",
+      "short_name": "NCR",
+      "full_name": "Necrosis",
+      "group": "Tumor",
+      "legend": "Necrosis",
+      "label_id": 1
+    },
+    "enhancing": {
+      "volume_cm3": 14.307999809452102,
+      "mesh_volume_cm3": 13.29723669019904,
+      "volume_error_pct": -7.064321587321618,
+      "watertight": true,
+      "color": [
+        59,
+        130,
+        246,
+        255
+      ],
+      "centroid_mm": [
+        -29.403581874204505,
+        -41.99918033740738,
+        67.52203205102902
+      ],
+      "source": "model",
+      "proximity": null,
+      "file": "enhancing.glb",
+      "short_name": "ET",
+      "full_name": "Enhancing Tumor",
+      "group": "Tumor",
+      "legend": "Enhancing Tumor",
+      "label_id": 3
+    },
+    "Left Cortex": {
+      "volume_cm3": 281.51699625087554,
+      "mesh_volume_cm3": 450.9128171167085,
+      "volume_error_pct": -0.25354585977163135,
+      "watertight": true,
+      "color": [
+        159,
+        184,
+        214,
+        89
+      ],
+      "centroid_mm": [
+        -29.59328845189613,
+        -7.725645373835775,
+        49.68776775264125
+      ],
+      "source": "synthseg",
+      "proximity": null,
+      "file": "Left Cortex.glb",
+      "short_name": "GM-L",
+      "full_name": "Cortical grey matter (left)",
+      "group": "Tissue",
+      "legend": "Cortical grey matter (left)",
+      "label_id": null,
+      "glass": true,
+      "hidden_by_default": false,
+      "lobe_tints": true,
+      "removed_voxels": 0
+    },
+    "Right Cortex": {
+      "volume_cm3": 378.7849949555014,
+      "mesh_volume_cm3": 383.2251584855495,
+      "volume_error_pct": -0.35591725581253547,
+      "watertight": true,
+      "color": [
+        159,
+        184,
+        214,
+        89
+      ],
+      "centroid_mm": [
+        25.850187972513105,
+        -10.045398630988643,
+        54.075765589906325
+      ],
+      "source": "synthseg",
+      "proximity": null,
+      "file": "Right Cortex.glb",
+      "short_name": "GM-R",
+      "full_name": "Cortical grey matter (right)",
+      "group": "Tissue",
+      "legend": "Cortical grey matter (right)",
+      "label_id": null,
+      "glass": true,
+      "hidden_by_default": false,
+      "lobe_tints": true,
+      "removed_voxels": 0
+    },
+    "Left Cerebellar Cortex": {
+      "volume_cm3": 59.72699920458105,
+      "mesh_volume_cm3": 58.954974577624,
+      "volume_error_pct": -1.29258900872059,
+      "watertight": true,
+      "color": [
+        159,
+        184,
+        214,
+        89
+      ],
+      "centroid_mm": [
+        -18.88054234481548,
+        -24.130658607984273,
+        -6.495913954860441
+      ],
+      "source": "synthseg",
+      "proximity": null,
+      "file": "Left Cerebellar Cortex.glb",
+      "short_name": "CbCtx-L",
+      "full_name": "Left Cerebellar Cortex",
+      "group": "Brainstem & Cerebellum",
+      "legend": "Cerebellar Cortex",
+      "label_id": 8,
+      "glass": true,
+      "hidden_by_default": false,
+      "lobe_tints": false,
+      "removed_voxels": 0
+    },
+    "Right Cerebellar Cortex": {
+      "volume_cm3": 63.64299915242942,
+      "mesh_volume_cm3": 62.82267520058949,
+      "volume_error_pct": -1.2889460942517728,
+      "watertight": true,
+      "color": [
+        159,
+        184,
+        214,
+        89
+      ],
+      "centroid_mm": [
+        19.993401902530977,
+        -27.995859846676915,
+        -2.948307645733877
+      ],
+      "source": "synthseg",
+      "proximity": null,
+      "file": "Right Cerebellar Cortex.glb",
+      "short_name": "CbCtx-R",
+      "full_name": "Right Cerebellar Cortex",
+      "group": "Brainstem & Cerebellum",
+      "legend": "Cerebellar Cortex",
+      "label_id": 47,
+      "glass": true,
+      "hidden_by_default": false,
+      "lobe_tints": false,
+      "removed_voxels": 0
+    },
+    "Grey matter total": {
+      "short_name": "GM",
+      "full_name": "Grey matter total",
+      "group": "Tissue",
+      "legend": "Grey matter total",
+      "label_id": null,
+      "volume_cm3": 695.1859907418066,
+      "color": [
+        159,
+        184,
+        214,
+        89
+      ],
+      "source": "synthseg",
+      "file": null,
+      "volume_only": true,
+      "glass": false,
+      "hidden_by_default": false
+    },
+    "Left Thalamus": {
+      "volume_cm3": 6.070999919148987,
+      "mesh_volume_cm3": 5.559312664849044,
+      "volume_error_pct": -8.428385127892907,
+      "watertight": true,
+      "color": [
+        0,
+        118,
+        14,
+        178
+      ],
+      "centroid_mm": [
+        -8.901516056409577,
+        -4.872424424931673,
+        41.54920243545496
+      ],
+      "source": "synthseg",
+      "proximity": null,
+      "file": "Left Thalamus.glb",
+      "short_name": "Thal-L",
+      "full_name": "Left Thalamus",
+      "group": "Subcortical",
+      "legend": "Thalamus",
+      "label_id": 10,
+      "glass": false,
+      "hidden_by_default": true,
+      "removed_voxels": 621
+    },
+    "Left Caudate": {
+      "volume_cm3": 4.4749999404038405,
+      "mesh_volume_cm3": 3.962969304872318,
+      "volume_error_pct": -11.442025527386159,
+      "watertight": true,
+      "color": [
+        122,
+        186,
+        220,
+        178
+      ],
+      "centroid_mm": [
+        -9.296740596397626,
+        20.76329119320686,
+        52.409769621463155
+      ],
+      "source": "synthseg",
+      "proximity": null,
+      "file": "Left Caudate.glb",
+      "short_name": "Caud-L",
+      "full_name": "Left Caudate",
+      "group": "Subcortical",
+      "legend": "Caudate",
+      "label_id": 11,
+      "glass": false,
+      "hidden_by_default": true,
+      "removed_voxels": 1246
+    },
+    "Left Putamen": {
+      "volume_cm3": 6.0309999196816895,
+      "mesh_volume_cm3": 5.490250661771216,
+      "volume_error_pct": -8.966162578543258,
+      "watertight": true,
+      "color": [
+        236,
+        13,
+        176,
+        178
+      ],
+      "centroid_mm": [
+        -21.829159914520694,
+        17.202128577118202,
+        44.10823845315019
+      ],
+      "source": "synthseg",
+      "proximity": null,
+      "file": "Left Putamen.glb",
+      "short_name": "Put-L",
+      "full_name": "Left Putamen",
+      "group": "Subcortical",
+      "legend": "Putamen",
+      "label_id": 12,
+      "glass": false,
+      "hidden_by_default": true,
+      "removed_voxels": 441
+    },
+    "Right Thalamus": {
+      "volume_cm3": 7.30199990275505,
+      "mesh_volume_cm3": 6.784408347476203,
+      "volume_error_pct": -7.088353357599443,
+      "watertight": true,
+      "color": [
+        0,
+        118,
+        14,
+        178
+      ],
+      "centroid_mm": [
+        10.655102107203504,
+        -5.93723037100203,
+        46.323021480954935
+      ],
+      "source": "synthseg",
+      "proximity": null,
+      "file": "Right Thalamus.glb",
+      "short_name": "Thal-R",
+      "full_name": "Right Thalamus",
+      "group": "Subcortical",
+      "legend": "Thalamus",
+      "label_id": 49,
+      "glass": false,
+      "hidden_by_default": true,
+      "removed_voxels": 0
+    },
+    "Right Caudate": {
+      "volume_cm3": 4.989999933545288,
+      "mesh_volume_cm3": 4.340146143237052,
+      "volume_error_pct": -13.02312222370169,
+      "watertight": true,
+      "color": [
+        122,
+        186,
+        220,
+        178
+      ],
+      "centroid_mm": [
+        14.87896951723522,
+        14.173408231542325,
+        57.43100534267275
+      ],
+      "source": "synthseg",
+      "proximity": null,
+      "file": "Right Caudate.glb",
+      "short_name": "Caud-R",
+      "full_name": "Right Caudate",
+      "group": "Subcortical",
+      "legend": "Caudate",
+      "label_id": 50,
+      "glass": false,
+      "hidden_by_default": true,
+      "removed_voxels": 205
+    },
+    "Right Putamen": {
+      "volume_cm3": 6.0149999198947715,
+      "mesh_volume_cm3": 5.460109465759408,
+      "volume_error_pct": -9.22511157980317,
+      "watertight": true,
+      "color": [
+        236,
+        13,
+        176,
+        178
+      ],
+      "centroid_mm": [
+        25.20857302418422,
+        12.05106942157446,
+        50.60112223636271
+      ],
+      "source": "synthseg",
+      "proximity": null,
+      "file": "Right Putamen.glb",
+      "short_name": "Put-R",
+      "full_name": "Right Putamen",
+      "group": "Subcortical",
+      "legend": "Putamen",
+      "label_id": 51,
+      "glass": false,
+      "hidden_by_default": true,
+      "removed_voxels": 0
+    },
+    "Possible blood products (experimental, T1-hyperintense)": {
+      "volume_cm3": 0.04999999933412113,
+      "mesh_volume_cm3": 0.0018040955979604274,
+      "volume_error_pct": -96.39180875602678,
+      "watertight": true,
+      "color": [
+        110,
+        22,
+        32,
+        255
+      ],
+      "centroid_mm": [
+        -16.339202449619783,
+        -44.11961596429348,
+        73.04250071778891
+      ],
+      "source": "heuristic",
+      "proximity": null,
+      "file": "Possible blood products (experimental, T1-hyperintense).glb",
+      "short_name": "T1+",
+      "full_name": "Possible blood products (experimental, T1-hyperintense)",
+      "group": "Tumor",
+      "legend": "Possible blood products (experimental, T1-hyperintense)",
+      "label_id": null,
+      "hidden_by_default": true,
+      "note": "Not validated \u2014 BraTS has no hemorrhage labels; confirmation needs SWI/GRE.",
+      "experimental": true
+    }
+  },
+  "legend": [
+    {
+      "name": "Cortical grey matter (left)",
+      "group": "Tissue",
+      "rgb": [
+        159,
+        184,
+        214
+      ],
+      "source": "synthseg",
+      "meshes": [
+        "Left Cortex"
+      ],
+      "volume_cm3": 281.51699625087554
+    },
+    {
+      "name": "Cortical grey matter (right)",
+      "group": "Tissue",
+      "rgb": [
+        159,
+        184,
+        214
+      ],
+      "source": "synthseg",
+      "meshes": [
+        "Right Cortex"
+      ],
+      "volume_cm3": 378.7849949555014
+    },
+    {
+      "name": "Grey matter total",
+      "group": "Tissue",
+      "rgb": [
+        159,
+        184,
+        214
+      ],
+      "source": "synthseg",
+      "meshes": [
+        "Grey matter total"
+      ],
+      "volume_cm3": 695.1859907418066
+    },
+    {
+      "name": "Thalamus",
+      "group": "Subcortical",
+      "rgb": [
+        0,
+        118,
+        14
+      ],
+      "source": "synthseg",
+      "meshes": [
+        "Left Thalamus",
+        "Right Thalamus"
+      ],
+      "volume_cm3": 13.372999821904036
+    },
+    {
+      "name": "Caudate",
+      "group": "Subcortical",
+      "rgb": [
+        122,
+        186,
+        220
+      ],
+      "source": "synthseg",
+      "meshes": [
+        "Left Caudate",
+        "Right Caudate"
+      ],
+      "volume_cm3": 9.464999873949129
+    },
+    {
+      "name": "Putamen",
+      "group": "Subcortical",
+      "rgb": [
+        236,
+        13,
+        176
+      ],
+      "source": "synthseg",
+      "meshes": [
+        "Left Putamen",
+        "Right Putamen"
+      ],
+      "volume_cm3": 12.04599983957646
+    },
+    {
+      "name": "Cerebellar Cortex",
+      "group": "Brainstem & Cerebellum",
+      "rgb": [
+        159,
+        184,
+        214
+      ],
+      "source": "synthseg",
+      "meshes": [
+        "Left Cerebellar Cortex",
+        "Right Cerebellar Cortex"
+      ],
+      "volume_cm3": 123.36999835701047
+    },
+    {
+      "name": "Edema",
+      "group": "Tumor",
+      "rgb": [
+        245,
+        197,
+        66
+      ],
+      "source": "model",
+      "meshes": [
+        "edema"
+      ],
+      "volume_cm3": 62.44899916833061
+    },
+    {
+      "name": "Necrosis",
+      "group": "Tumor",
+      "rgb": [
+        192,
+        57,
+        43
+      ],
+      "source": "model",
+      "meshes": [
+        "necrosis"
+      ],
+      "volume_cm3": 38.297999489963416
+    },
+    {
+      "name": "Enhancing Tumor",
+      "group": "Tumor",
+      "rgb": [
+        59,
+        130,
+        246
+      ],
+      "source": "model",
+      "meshes": [
+        "enhancing"
+      ],
+      "volume_cm3": 14.307999809452102
+    },
+    {
+      "name": "Possible blood products (experimental, T1-hyperintense)",
+      "group": "Tumor",
+      "rgb": [
+        110,
+        22,
+        32
+      ],
+      "source": "heuristic",
+      "meshes": [
+        "Possible blood products (experimental, T1-hyperintense)"
+      ],
+      "volume_cm3": 0.04999999933412113
+    }
+  ],
+  "tract_proximity": {},
+  "tumor_location": {
+    "margin_mm": 10.0,
+    "min_overlap_voxels": 50,
+    "WT": [
+      {
+        "name": "Frontal Lobe",
+        "group": "Cortex",
+        "label_id": 101,
+        "relation": "overlaps",
+        "distance_mm": 0.0,
+        "contact_voxels": 5791
+      },
+      {
+        "name": "Insular Lobe",
+        "group": "Cortex",
+        "label_id": 105,
+        "relation": "overlaps",
+        "distance_mm": 0.0,
+        "contact_voxels": 307
+      },
+      {
+        "name": "Left Caudate",
+        "group": "Subcortical",
+        "label_id": 11,
+        "relation": "overlaps",
+        "distance_mm": 0.0,
+        "contact_voxels": 284
+      },
+      {
+        "name": "Left Putamen",
+        "group": "Subcortical",
+        "label_id": 12,
+        "relation": "overlaps",
+        "distance_mm": 0.0,
+        "contact_voxels": 128
+      },
+      {
+        "name": "Left Thalamus",
+        "group": "Subcortical",
+        "label_id": 10,
+        "relation": "overlaps",
+        "distance_mm": 0.0,
+        "contact_voxels": 191
+      },
+      {
+        "name": "Occipital Lobe",
+        "group": "Cortex",
+        "label_id": 104,
+        "relation": "overlaps",
+        "distance_mm": 0.0,
+        "contact_voxels": 3483
+      },
+      {
+        "name": "Parietal Lobe",
+        "group": "Cortex",
+        "label_id": 102,
+        "relation": "overlaps",
+        "distance_mm": 0.0,
+        "contact_voxels": 10597
+      },
+      {
+        "name": "Temporal Lobe",
+        "group": "Cortex",
+        "label_id": 103,
+        "relation": "overlaps",
+        "distance_mm": 0.0,
+        "contact_voxels": 209
+      },
+      {
+        "name": "Right Caudate",
+        "group": "Subcortical",
+        "label_id": 50,
+        "relation": "within_10mm",
+        "distance_mm": 1.0,
+        "contact_voxels": 40
+      },
+      {
+        "name": "Right Putamen",
+        "group": "Subcortical",
+        "label_id": 51,
+        "relation": "within_10mm",
+        "distance_mm": 4.472,
+        "contact_voxels": 0
+      },
+      {
+        "name": "Left Cerebellar Cortex",
+        "group": "Brainstem & Cerebellum",
+        "label_id": 8,
+        "relation": "within_10mm",
+        "distance_mm": 6.708,
+        "contact_voxels": 0
+      },
+      {
+        "name": "Right Cerebellar Cortex",
+        "group": "Brainstem & Cerebellum",
+        "label_id": 47,
+        "relation": "within_10mm",
+        "distance_mm": 7.81,
+        "contact_voxels": 0
+      }
+    ],
+    "ET": [
+      {
+        "name": "Frontal Lobe",
+        "group": "Cortex",
+        "label_id": 101,
+        "relation": "overlaps",
+        "distance_mm": 0.0,
+        "contact_voxels": 137
+      },
+      {
+        "name": "Occipital Lobe",
+        "group": "Cortex",
+        "label_id": 104,
+        "relation": "overlaps",
+        "distance_mm": 0.0,
+        "contact_voxels": 792
+      },
+      {
+        "name": "Parietal Lobe",
+        "group": "Cortex",
+        "label_id": 102,
+        "relation": "overlaps",
+        "distance_mm": 0.0,
+        "contact_voxels": 1587
+      }
+    ]
+  },
+  "removed_voxels": {
+    "Left Cerebellar Cortex": 0,
+    "Left Thalamus": 621,
+    "Left Caudate": 1246,
+    "Left Putamen": 441,
+    "Right Cerebellar Cortex": 0,
+    "Right Thalamus": 0,
+    "Right Caudate": 205,
+    "Right Putamen": 0,
+    "Frontal Lobe": 26287,
+    "Parietal Lobe": 63267,
+    "Temporal Lobe": 674,
+    "Occipital Lobe": 15716,
+    "Insular Lobe": 1111
+  },
+  "anatomy_removed_voxels": {
+    "left cerebellum cortex": 0,
+    "left thalamus": 621,
+    "left caudate": 1246,
+    "left putamen": 441,
+    "right cerebellum cortex": 0,
+    "right thalamus": 0,
+    "right caudate": 205,
+    "right putamen": 0,
+    "frontal": 26287,
+    "parietal": 63267,
+    "temporal": 674,
+    "occipital": 15716,
+    "insula": 1111
+  },
+  "blood_products_note": "Not validated \u2014 BraTS has no hemorrhage labels; confirmation needs SWI/GRE.",
+  "anatomy_warning": null
+}

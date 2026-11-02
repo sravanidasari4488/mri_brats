@@ -30,6 +30,43 @@ def test_brain_mask_closes_and_fills_holes():
     assert not mask[0, 0, 0]
 
 
+def test_brain_mask_keeps_a_border_touching_brain_from_filling_the_box():
+    image = np.zeros((4, 12, 12, 12), dtype=np.float32)
+    image[:, 0:9, 2:10, 2:10] = 1
+    image[:, 4:6, 5:7, 5:7] = 0
+    image[:, 11, 11, 11] = 0.4
+    config = PostConfig.from_yaml()
+    mask = brain_mask_from_image(image, config)
+    assert mask[0, 5, 5]
+    assert mask[5, 6, 6]
+    assert not mask[11, 11, 11]
+    assert not mask[11, 0, 0]
+
+
+def test_brain_mask_on_zscored_volumes_uses_nonzero_tissue():
+    rng = np.random.default_rng(0)
+    image = np.zeros((4, 16, 16, 16), dtype=np.float32)
+    tissue = rng.normal(0, 1, (8, 8, 8)).astype(np.float32)
+    tissue[3:5, 3:5, 3:5] = 0
+    image[:, 2:10, 2:10, 2:10] = tissue
+    mask = brain_mask_from_image(image, PostConfig.from_yaml())
+    assert mask[6, 6, 6]
+    assert mask[2, 2, 2]
+    assert not mask[0, 0, 0]
+    assert int(mask.sum()) < 16 * 16 * 16 // 2
+
+
+def test_brain_mask_ignores_negative_fov_fill():
+    image = np.full((4, 16, 16, 16), -0.2, dtype=np.float32)
+    image[:, 3:12, 3:12, 3:12] = 1.5
+    image[:, 6:8, 6:8, 6:8] = 0
+    mask = brain_mask_from_image(image, PostConfig.from_yaml())
+    assert mask[4, 4, 4]
+    assert mask[7, 7, 7]
+    assert not mask[0, 0, 0]
+    assert int(mask.sum()) < 16 * 16 * 16 // 2
+
+
 def _volume(config: PostConfig):
     """WT slab, TC inside it, ET core, plus a speck and an out-of-hierarchy ET."""
     shape = (16, 16, 16)
@@ -127,6 +164,9 @@ def test_config_paths_are_per_model():
 if __name__ == "__main__":
     test_yaml_loads_region_cutoffs()
     test_brain_mask_closes_and_fills_holes()
+    test_brain_mask_keeps_a_border_touching_brain_from_filling_the_box()
+    test_brain_mask_on_zscored_volumes_uses_nonzero_tissue()
+    test_brain_mask_ignores_negative_fov_fill()
     test_hierarchy_component_filter_and_et_to_necrosis()
     test_et_kept_when_large_enough()
     test_shuffled_channel_order_gives_the_same_label_map()

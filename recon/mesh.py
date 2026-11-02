@@ -13,9 +13,17 @@ import trimesh
 from scipy import ndimage
 from skimage import measure
 
-from recon.labels import CORE, EDEMA, ENHANCING, rgba
+from recon.labels import CORE, EDEMA, ENHANCING, NECROSIS, rgba
 
 SHELL_NAMES = (EDEMA, CORE, ENHANCING)
+
+# Irregular tumor cores stay sharp; edema is a slightly softer envelope.
+TUMOR_MESH_SETTINGS = {
+    EDEMA: {"sigma": 0.7, "taubin_iters": 10},
+    CORE: {"sigma": 0.5, "taubin_iters": 5},
+    ENHANCING: {"sigma": 0.5, "taubin_iters": 5},
+    NECROSIS: {"sigma": 0.5, "taubin_iters": 5},
+}
 
 
 class MeshCheck(NamedTuple):
@@ -26,9 +34,9 @@ class MeshCheck(NamedTuple):
 def mesh_from_mask(mask, affine, sigma=0.7, taubin_iters=15, decimate_to=None):
     """Binary mask to a mesh in scanner millimeters.
 
-    Gaussian smooth (sigma 0.7), pad, marching cubes at 0.5, Taubin smooth,
-    then the RAS affine. Optional quadric decimation when ``decimate_to`` is a
-    face count. No Laplacian smoothing.
+    Gaussian smooth, pad, marching cubes on the voxel grid (1 mm BraTS),
+    Taubin smooth, then the RAS affine. Optional quadric decimation when
+    ``decimate_to`` is a face count. No Laplacian smoothing.
     """
     if np.asarray(mask).sum() == 0:
         return None
@@ -78,12 +86,20 @@ def _paint(mesh, name):
     return mesh
 
 
+def mesh_compartment(name, mask, affine):
+    """Mesh one tumor compartment with the glass-brain smoothing schedule."""
+    settings = TUMOR_MESH_SETTINGS.get(name, {"sigma": 0.7, "taubin_iters": 15})
+    return _paint(mesh_from_mask(mask, affine, **settings), name)
+
+
 def mesh_shells(label, affine, **kwargs) -> dict[str, trimesh.Trimesh | None]:
     """One closed shell per nested region. Empty regions are ``None``."""
-    return {
-        name: _paint(mesh_from_mask(mask, affine, **kwargs), name)
-        for name, mask in region_shells(label).items()
-    }
+    if kwargs:
+        return {
+            name: _paint(mesh_from_mask(mask, affine, **kwargs), name)
+            for name, mask in region_shells(label).items()
+        }
+    return {name: mesh_compartment(name, mask, affine) for name, mask in region_shells(label).items()}
 
 
 def iter_parcellation_meshes(parc, affine, **kwargs):

@@ -1,0 +1,2 @@
+study_id,qc_status,qc_reasons,wt_cm3,tc_cm3,et_cm3,abc2_cm3,largest_component_cm3,abc2_largest_cm3,ratio,wt_components,component_volumes_cm3,mean_wt_prob,runtime_s,preprocess_s,inference_s,postprocess_s,synthseg_s,lobe_warp_s,meshing_s,export_s,anatomy_warning
+study_89383f7fd493,WARN,thick FLAIR: tumor boundary accuracy reduced; thick slices: t1c 5 mm; thick slices: t2 5 mm,1.120,0.000,0.000,1.050,1.120,1.050,0.938,1,1.120,0.9298,356.8,2942.6,205.7,,,,,,

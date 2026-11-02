@@ -73,9 +73,26 @@ def test_nested_shell_volumes_rank_and_stay_within_3_percent():
     assert volumes["edema"] > volumes["core"] > volumes["enhancing"]
 
 
+def test_necrosis_keeps_volume_within_3_percent():
+    from recon.mesh import TUMOR_MESH_SETTINGS, mesh_compartment
+
+    shape = (48, 48, 48)
+    mask = _sphere(shape, (23.5, 23.5, 23.5), 14)
+    mask[18:28, 20:23, 18:28] = False
+    affine = _affine()
+    mesh = mesh_compartment("necrosis", mask, affine)
+    watertight, err = check_mesh(mesh, mask, affine)
+    assert watertight
+    assert abs(err) < 3.0
+    assert TUMOR_MESH_SETTINGS["necrosis"]["sigma"] == 0.5
+    assert TUMOR_MESH_SETTINGS["necrosis"]["taubin_iters"] == 5
+    assert TUMOR_MESH_SETTINGS["edema"]["sigma"] == 0.7
+
+
 if __name__ == "__main__":
     test_sphere_is_watertight_within_3_percent()
     test_empty_mask_returns_none()
     test_shells_are_nested_wt_tc_et()
     test_nested_shell_volumes_rank_and_stay_within_3_percent()
+    test_necrosis_keeps_volume_within_3_percent()
     print("mesh ok")

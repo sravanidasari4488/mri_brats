@@ -1,0 +1,9 @@
+{
+  "case_id": "BraTS20_Training_004",
+  "template": "C:\\Users\\Sravani\\Desktop\\projects\\mri_brats\\atlases\\MNI152_T1_1mm.nii.gz",
+  "tumor_sha256": "3bf2eeadfae5979ae81f6af1e8c5d95f57c19c696f164ee98ab23a9099b2f2ae",
+  "transforms": [
+    "00_tmpyqdkfj7i1Warp.nii.gz",
+    "01_tmpyqdkfj7i0GenericAffine.mat"
+  ]
+}

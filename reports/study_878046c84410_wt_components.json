@@ -1,0 +1,182 @@
+[
+  {
+    "rank": 1,
+    "volume_cm3": 15.928,
+    "n_voxels": 15928,
+    "contains_tc": true,
+    "mean_wt_prob": 0.9563186168670654,
+    "nearest_lobe": "Frontal Lobe",
+    "centroid_ijk": [
+      80.66,
+      145.49,
+      156.2
+    ],
+    "centroid_mm": [
+      19.31,
+      37.81,
+      72.15
+    ]
+  },
+  {
+    "rank": 2,
+    "volume_cm3": 12.737,
+    "n_voxels": 12737,
+    "contains_tc": true,
+    "mean_wt_prob": 0.9452982544898987,
+    "nearest_lobe": "Parietal Lobe",
+    "centroid_ijk": [
+      91.84,
+      83.08,
+      154.58
+    ],
+    "centroid_mm": [
+      23.86,
+      -25.45,
+      71.95
+    ]
+  },
+  {
+    "rank": 3,
+    "volume_cm3": 12.734,
+    "n_voxels": 12734,
+    "contains_tc": true,
+    "mean_wt_prob": 0.9431302547454834,
+    "nearest_lobe": "Occipital Lobe",
+    "centroid_ijk": [
+      89.76,
+      52.85,
+      123.31
+    ],
+    "centroid_mm": [
+      14.79,
+      -56.27,
+      42.56
+    ]
+  },
+  {
+    "rank": 4,
+    "volume_cm3": 10.635,
+    "n_voxels": 10635,
+    "contains_tc": true,
+    "mean_wt_prob": 0.9531404376029968,
+    "nearest_lobe": "Occipital Lobe",
+    "centroid_ijk": [
+      46.24,
+      56.03,
+      118.33
+    ],
+    "centroid_mm": [
+      -28.46,
+      -48.69,
+      42.85
+    ]
+  },
+  {
+    "rank": 5,
+    "volume_cm3": 5.69,
+    "n_voxels": 5690,
+    "contains_tc": true,
+    "mean_wt_prob": 0.9140042066574097,
+    "nearest_lobe": "Frontal Lobe",
+    "centroid_ijk": [
+      47.51,
+      169.63,
+      152.33
+    ],
+    "centroid_mm": [
+      -11.47,
+      65.17,
+      71.32
+    ]
+  },
+  {
+    "rank": 6,
+    "volume_cm3": 5.382,
+    "n_voxels": 5382,
+    "contains_tc": false,
+    "mean_wt_prob": 0.903312623500824,
+    "nearest_lobe": "Frontal Lobe",
+    "centroid_ijk": [
+      35.94,
+      125.75,
+      150.77
+    ],
+    "centroid_mm": [
+      -27.5,
+      22.73,
+      73.16
+    ]
+  },
+  {
+    "rank": 7,
+    "volume_cm3": 2.02,
+    "n_voxels": 2020,
+    "contains_tc": false,
+    "mean_wt_prob": 0.9343323111534119,
+    "nearest_lobe": "Frontal Lobe",
+    "centroid_ijk": [
+      103.08,
+      167.08,
+      132.45
+    ],
+    "centroid_mm": [
+      40.58,
+      56.16,
+      44.88
+    ]
+  },
+  {
+    "rank": 8,
+    "volume_cm3": 1.954,
+    "n_voxels": 1954,
+    "contains_tc": false,
+    "mean_wt_prob": 0.841555118560791,
+    "nearest_lobe": "Temporal Lobe",
+    "centroid_ijk": [
+      28.01,
+      115.54,
+      103.81
+    ],
+    "centroid_mm": [
+      -42.32,
+      11.92,
+      28.04
+    ]
+  },
+  {
+    "rank": 9,
+    "volume_cm3": 1.428,
+    "n_voxels": 1428,
+    "contains_tc": true,
+    "mean_wt_prob": 0.9026390314102173,
+    "nearest_lobe": "Frontal Lobe",
+    "centroid_ijk": [
+      42.35,
+      162.26,
+      119.1
+    ],
+    "centroid_mm": [
+      -21.53,
+      57.34,
+      39.35
+    ]
+  },
+  {
+    "rank": 10,
+    "volume_cm3": 0.839,
+    "n_voxels": 839,
+    "contains_tc": false,
+    "mean_wt_prob": 0.8516006469726562,
+    "nearest_lobe": "Parietal Lobe",
+    "centroid_ijk": [
+      107.54,
+      104.22,
+      163.16
+    ],
+    "centroid_mm": [
+      42.57,
+      -5.82,
+      77.58
+    ]
+  }
+]

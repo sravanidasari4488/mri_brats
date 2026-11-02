@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>BraTS viewer</title>
-  <link rel="stylesheet" href="/static/viewer.css">
+  <link rel="stylesheet" href="/static/viewer.css?v=anatomy1">
   <script type="importmap">
     {
       "imports": {
@@ -18,17 +18,36 @@
   <section id="upload-screen">
     <form id="upload-form">
       <h1>Open a scan</h1>
-      <p>Four BraTS NIfTIs. A segmentation file is optional.</p>
-      <label>FLAIR (t2f) <input name="t2f" type="file" accept=".nii,.nii.gz" required></label>
-      <label>T1 (t1n) <input name="t1n" type="file" accept=".nii,.nii.gz" required></label>
-      <label>T1c <input name="t1c" type="file" accept=".nii,.nii.gz" required></label>
-      <label>T2 (t2w) <input name="t2w" type="file" accept=".nii,.nii.gz" required></label>
-      <label>Segmentation <input name="seg" type="file" accept=".nii,.nii.gz"></label>
-      <label>SynthSeg <input name="synthseg" type="file" accept=".nii,.nii.gz"></label>
-      <label class="check"><input name="anatomy" type="checkbox"> Anatomy</label>
-      <label class="check"><input name="tracts" type="checkbox"> Tracts</label>
-      <button type="submit">Upload and reconstruct</button>
+      <p>Add the folder with the MRI scans. You don't need to know which file is which: we read the file names and show what we found.</p>
+      <div id="drop-zone" tabindex="0" role="button" aria-label="Add the scan folder">
+        <strong>Drag the scan folder here</strong>
+        <span>or</span>
+        <div class="drop-buttons">
+          <button type="button" id="pick-folder">Choose folder</button>
+          <button type="button" id="pick-files">Choose files</button>
+        </div>
+        <small>MRI files end in .nii or .nii.gz</small>
+      </div>
+      <input id="folder-input" type="file" webkitdirectory multiple hidden>
+      <input id="files-input" type="file" multiple accept=".nii,.nii.gz,.gz" hidden>
+      <section id="scan-review" hidden>
+        <h2>What we found</h2>
+        <ul id="scan-checklist"></ul>
+        <div id="scan-unknown"></div>
+        <p id="scan-hint"></p>
+        <button type="button" id="scan-clear" class="link">Start over</button>
+      </section>
+      <details id="advanced">
+        <summary>Advanced options</summary>
+        <label class="check"><input name="anatomy" type="checkbox" checked> Show brain structures</label>
+        <label class="check"><input name="tracts" type="checkbox"> Show nerve-fibre pathways (atlas estimate)</label>
+      </details>
+      <button type="submit" id="upload-submit" disabled>Build 3D model</button>
       <p id="upload-status" role="status"></p>
+      <div id="job-progress" hidden>
+        <div class="job-bar" aria-hidden="true"><span id="job-bar-fill"></span></div>
+        <ol id="job-stages"></ol>
+      </div>
     </form>
   </section>
 
@@ -36,27 +55,40 @@
     <canvas id="view"></canvas>
     <aside id="panel">
       <h1 id="case-title">Case</h1>
+      <p id="anatomy-warning" hidden></p>
       <p id="tract-note" hidden>Tracts are atlas-estimated, not patient tractography.</p>
       <div id="presets"></div>
       <label class="label-mode">Labels
         <select id="label-mode">
+          <option value="hover" selected>Hovered only</option>
           <option value="all">All</option>
-          <option value="hover">Hovered only</option>
           <option value="off">Off</option>
         </select>
       </label>
+      <label class="label-mode">Glass opacity
+        <input id="glass-opacity" type="range" min="0.05" max="1" step="0.01" value="0.7">
+      </label>
+      <label class="label-mode">Rim intensity
+        <input id="glass-intensity" type="range" min="0.2" max="3" step="0.05" value="1.35">
+      </label>
+      <label class="check"><input id="lobe-tint" type="checkbox"> Lobe tint</label>
+      <label class="check"><input id="auto-rotate" type="checkbox"> Auto-rotate</label>
       <button id="screenshot" type="button">Save PNG</button>
       <section id="tumor-card">
         <h2>Tumor location</h2>
         <div id="tumor-location"></div>
+        <p id="blood-note" hidden></p>
       </section>
       <div id="groups"></div>
       <section>
         <h2>MRI slice</h2>
+        <p class="muted">The 2×2 panel matches this plane. Change sequence to recolour the 3D cut.</p>
         <label>Sequence
           <select id="modality">
             <option value="flair">FLAIR</option>
+            <option value="t1">T1</option>
             <option value="t1c">T1c</option>
+            <option value="t2">T2</option>
           </select>
         </label>
         <div id="clip-controls"></div>
@@ -66,8 +98,83 @@
         <div id="proximity"></div>
       </section>
     </aside>
+    <section id="slices-panel">
+      <header>
+        <h2>Slices</h2>
+        <div class="slice-orients" role="group" aria-label="Slice orientation">
+          <button type="button" data-orient="2" class="is-active">Axial</button>
+          <button type="button" data-orient="1">Coronal</button>
+          <button type="button" data-orient="0">Sagittal</button>
+        </div>
+      </header>
+      <div id="slice-grid">
+        <figure data-seq="flair">
+          <div class="slice-frame">
+            <span class="orient top" data-edge="top"></span>
+            <span class="orient bottom" data-edge="bottom"></span>
+            <span class="orient left" data-edge="left"></span>
+            <span class="orient right" data-edge="right"></span>
+            <canvas></canvas>
+          </div>
+          <figcaption>FLAIR</figcaption>
+        </figure>
+        <figure data-seq="t1">
+          <div class="slice-frame">
+            <span class="orient top" data-edge="top"></span>
+            <span class="orient bottom" data-edge="bottom"></span>
+            <span class="orient left" data-edge="left"></span>
+            <span class="orient right" data-edge="right"></span>
+            <canvas></canvas>
+          </div>
+          <figcaption>T1</figcaption>
+        </figure>
+        <figure data-seq="t1c">
+          <div class="slice-frame">
+            <span class="orient top" data-edge="top"></span>
+            <span class="orient bottom" data-edge="bottom"></span>
+            <span class="orient left" data-edge="left"></span>
+            <span class="orient right" data-edge="right"></span>
+            <canvas></canvas>
+          </div>
+          <figcaption>T1c</figcaption>
+        </figure>
+        <figure data-seq="t2">
+          <div class="slice-frame">
+            <span class="orient top" data-edge="top"></span>
+            <span class="orient bottom" data-edge="bottom"></span>
+            <span class="orient left" data-edge="left"></span>
+            <span class="orient right" data-edge="right"></span>
+            <canvas></canvas>
+          </div>
+          <figcaption>T2</figcaption>
+        </figure>
+      </div>
+      <label class="slice-slider">Slice
+        <input id="slice-index" type="range" min="0" max="1" value="0">
+        <span id="slice-index-readout">0</span>
+      </label>
+      <label class="slice-slider">Overlay opacity
+        <input id="overlay-opacity" type="range" min="0" max="1" step="0.05" value="0.85">
+      </label>
+      <div id="wl-box">
+        <label>Window / level
+          <select id="wl-seq">
+            <option value="flair">FLAIR</option>
+            <option value="t1">T1</option>
+            <option value="t1c">T1c</option>
+            <option value="t2">T2</option>
+          </select>
+        </label>
+        <label class="slice-slider">Window
+          <input id="wl-width" type="range" min="1" max="1000" value="400">
+        </label>
+        <label class="slice-slider">Level
+          <input id="wl-level" type="range" min="0" max="1000" value="200">
+        </label>
+      </div>
+    </section>
     <div id="tooltip" hidden></div>
   </div>
-  <script type="module" src="/static/viewer.js"></script>
+  <script type="module" src="/static/viewer.js?v=anatomy1"></script>
 </body>
 </html>

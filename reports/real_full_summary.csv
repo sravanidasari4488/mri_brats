@@ -1,0 +1,13 @@
+study_id,qc_status,qc_reasons,wt_cm3,tc_cm3,et_cm3,abc2_cm3,largest_component_cm3,abc2_largest_cm3,ratio,wt_components,component_volumes_cm3,mean_wt_prob,runtime_s,preprocess_s,inference_s,postprocess_s,synthseg_s,lobe_warp_s,meshing_s,export_s,anatomy_warning
+study_0c9d6f4e6da0,WARN,thick FLAIR: tumor boundary accuracy reduced; thick slices: t1c 5 mm; thick slices: t2 5 mm,2.727,1.436,0.387,2.635,2.727,2.635,0.966,1,2.727,0.9710,70335.8,,,,,,,,
+study_1bcffba11516,PASS,,0.000,0.000,0.000,0.000,0.000,0.000,,0,,0.0326,456.1,,,,,,,,
+study_218e8b2342ba,WARN,thick FLAIR: tumor boundary accuracy reduced; thick slices: t1c 5 mm; thick slices: t2 5 mm,17.137,8.083,4.212,11.739,10.952,11.739,1.072,4,10.952;2.324;2.165;1.696,0.9403,718.5,,,,,,,,
+study_32b4a84d22f5,WARN,thick FLAIR: tumor boundary accuracy reduced; thick slices: t1c 5 mm; thick slices: t2 5 mm,0.000,0.000,0.000,0.000,0.000,0.000,,0,,0.0324,502.0,,,,,,,,
+study_4cfc47a3753f,FAIL,missing sequences: t1c; no contrast: enhancing tumor may be missed; thick FLAIR: tumor boundary accuracy reduced; thick slices: t2 5 mm,,,,,,,,,,,6067.7,6067.7,,,,,,,
+study_878046c84410,WARN,thick FLAIR: tumor boundary accuracy reduced; thick slices: t1c 5 mm,69.347,16.277,7.608,27.342,15.928,27.342,1.717,10,15.928;12.737;12.734;10.635;5.690;5.382;2.020;1.954;1.428;0.839,0.9376,403.0,,,,,,,,
+study_89383f7fd493,WARN,thick FLAIR: tumor boundary accuracy reduced; thick slices: t1c 5 mm; thick slices: t2 5 mm,1.120,0.000,0.000,1.050,1.120,1.050,0.938,1,1.120,0.9298,356.8,2942.6,205.7,,,,,,
+study_8efb393d412f,WARN,thick FLAIR: tumor boundary accuracy reduced,4.404,0.000,0.000,6.118,4.404,6.118,1.389,1,4.404,0.9568,641.4,,,,,,,,
+study_b6132bee1d16,WARN,thick FLAIR: tumor boundary accuracy reduced; thick slices: t1c 4 mm,0.000,0.000,0.000,0.000,0.000,0.000,,0,,0.0326,651.9,,,,,,,,
+study_bae9fff41ed5,WARN,thick FLAIR: tumor boundary accuracy reduced,0.000,0.000,0.000,0.000,0.000,0.000,,0,,0.0321,500.3,,,,,,,,
+study_cabf8c832a83,WARN,thick FLAIR: tumor boundary accuracy reduced; thick slices: t1c 5 mm; thick slices: t2 5 mm,21.555,8.131,0.796,42.500,18.732,42.500,2.269,2,18.732;2.823,0.9598,50288.7,,,,,,,,
+study_ff9c6c72e9d1,WARN,thick FLAIR: tumor boundary accuracy reduced; thick slices: t1c 5 mm; thick slices: t2 5 mm,115.055,52.606,14.308,159.560,113.231,159.560,1.409,3,113.231;1.064;0.760,0.9225,15900.8,,,,,,,,

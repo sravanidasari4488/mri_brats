@@ -236,6 +236,43 @@ def test_parcellate_reuses_cached_transforms_and_writes_anatomy_seg():
         tracts._import_ants = original
 
 
+def test_cpu_skips_synthseg_and_uses_the_atlas():
+    import recon.anatomy as anatomy
+
+    shape = (6, 6, 6)
+    atlas = np.zeros(shape, dtype=np.int16)
+    atlas[1:5, 1:5, 1:5] = 3
+    calls = {"synthseg": 0}
+
+    def runner(t1, affine, device):
+        calls["synthseg"] += 1
+        raise AssertionError("SynthSeg should not run on CPU")
+
+    def fake_warp(t1_path, tumor_label, **kwargs):
+        return atlas, np.eye(4)
+
+    original = anatomy.warp_mni_lobes
+    anatomy.warp_mni_lobes = fake_warp
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            t1 = np.zeros(shape, dtype=np.float32)
+            t1[1:5, 1:5, 1:5] = 1
+            _write(root / "t1.nii.gz", t1)
+            raw, cleaned, _removed = parcellate_case(
+                root / "t1.nii.gz",
+                np.zeros(shape, dtype=np.uint8),
+                np.eye(4),
+                device="cpu",
+                synthseg_runner=None,
+            )
+    finally:
+        anatomy.warp_mni_lobes = original
+    assert calls["synthseg"] == 0
+    assert int(raw.max()) == LOBE_LABELS["frontal"]
+    assert int(cleaned.max()) == LOBE_LABELS["frontal"]
+
+
 def test_desikan_labels_skip_the_lobe_warp():
     shape = (4, 4, 4)
     synth = np.zeros(shape, dtype=np.int16)
@@ -259,3 +296,69 @@ def test_desikan_labels_skip_the_lobe_warp():
         )
     assert cleaned[1, 1, 1] == 1003
     assert removed["ctx-lh-superiorfrontal"] == 0
+
+
+def test_lobe_warp_keeps_the_t1_nifti_affine():
+    """ANTs reports LPS. Resampling with that affine onto a RAS T1 drops every label."""
+    labels = np.zeros((8, 8, 8), dtype=np.int16)
+    labels[2:6, 2:6, 2:6] = 101
+    ras = np.eye(4, dtype=np.float64)
+    lps = np.eye(4, dtype=np.float64)
+    lps[0, 0] = lps[1, 1] = -1.0
+    kept = resample_parcellation(labels, ras, labels.shape, ras)
+    lost = resample_parcellation(labels, lps, labels.shape, ras)
+    assert int((kept == 101).sum()) == int((labels == 101).sum())
+    assert int((lost == 101).sum()) == 0
+
+    import recon.tracts as tracts
+    from recon.anatomy import warp_mni_lobes
+
+    class _LpsImage(_Image):
+        def __init__(self, array):
+            super().__init__(array)
+            self.direction = np.diag([-1.0, -1.0, 1.0])
+
+    class _Ants:
+        def image_read(self, path):
+            data = np.asanyarray(nib.load(path).dataobj)
+            if data.ndim == 4:
+                data = data[..., 0]
+            return _LpsImage(data)
+
+        def registration(self, fixed, moving, type_of_transform, mask):
+            path = Path(tempfile.gettempdir()) / "mri_brats_lps_syn.mat"
+            path.write_text("syn", encoding="utf-8")
+            return {"fwdtransforms": [str(path)]}
+
+        def apply_transforms(self, fixed, moving, transformlist, interpolator):
+            return _LpsImage(np.full(fixed.shape, 3, dtype=np.float32))
+
+    original = tracts._import_ants
+    tracts._import_ants = lambda: _Ants()
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            affine = np.eye(4, dtype=np.float64)
+            affine[0, 3] = 12.0
+            _write(root / "t1.nii.gz", np.ones((6, 6, 6), dtype=np.float32), affine)
+            _write(root / "MNI152_T1_1mm.nii.gz", np.ones((4, 4, 4), dtype=np.float32), np.eye(4))
+            _write(root / "MNI" / "MNI-maxprob-thr25-1mm.nii.gz", np.ones((4, 4, 4), dtype=np.uint8), np.eye(4))
+            warped, warped_affine = warp_mni_lobes(
+                root / "t1.nii.gz",
+                np.zeros((6, 6, 6), dtype=np.uint8),
+                atlas_dir=root,
+                cache_dir=root / "cache",
+                case_id="lps",
+                split=True,
+            )
+    finally:
+        tracts._import_ants = original
+    assert np.allclose(warped_affine, affine)
+    assert warped.shape == (6, 6, 6)
+
+
+if __name__ == "__main__":
+    test_resample_is_nearest_and_uses_the_tumor_affine()
+    test_cpu_skips_synthseg_and_uses_the_atlas()
+    test_lobe_warp_keeps_the_t1_nifti_affine()
+    print("anatomy_parc ok")

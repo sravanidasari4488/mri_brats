@@ -2,7 +2,8 @@
 
 Example:
     python scripts/reconstruct.py --case path/to/BraTS-00001
-    python scripts/reconstruct.py --case path/to/BraTS-00001 --anatomy --tracts
+    python scripts/reconstruct.py --case path/to/BraTS-00001 --no-anatomy
+    python scripts/reconstruct.py --case path/to/BraTS-00001 --tracts
 """
 
 from __future__ import annotations
@@ -38,13 +39,19 @@ def default_checkpoint() -> Path:
 
 def main(argv=None) -> None:
     parser = argparse.ArgumentParser(description="Inference, post-processing, and scene export for one BraTS case")
-    parser.add_argument("--case", type=Path, required=True, help="BraTS case folder (t1n, t1c, t2w, t2f, seg)")
-    parser.add_argument("--anatomy", action="store_true", help="Add the brain shell and SynthSeg structures")
+    parser.add_argument("--case", type=Path, required=True, help="BraTS case folder: t2f/t1n/t1c/t2w/seg, BraTS 2020 flair/t1/t1ce/t2/seg, or flair/t1/t1c/t2/mask")
+    parser.add_argument(
+        "--anatomy",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Add GM/WM, subcortical, ventricles, cerebellum, brainstem, and lobes (default on)",
+    )
     parser.add_argument("--tracts", action="store_true", help="Warp and mesh the JHU atlas tracts")
     parser.add_argument("--model", choices=("ours", "abhinav_v3"), default="ours", help="ours keeps the local preprocessing. abhinav_v3 uses the teammate checkpoint and its validation preprocessing")
     parser.add_argument("--checkpoint", type=Path, default=None, help="SegResNet checkpoint. Default: BRATS_CHECKPOINT or the smoke checkpoint; abhinav_v3 uses checkpoints/brats_scale_full/best_model.pt")
     parser.add_argument("--synthseg", type=Path, default=None, help="SynthSeg parcellation NIfTI. Default: *synthseg* in the case folder")
     parser.add_argument("--output", type=Path, default=None, help="Output root. Default: outputs/")
+    parser.add_argument("--fast", action="store_true", help="Four flipped views and overlap 0.5 instead of eight and 0.625. About 3x faster")
     args = parser.parse_args(argv)
     if args.checkpoint is not None:
         checkpoint = args.checkpoint
@@ -62,6 +69,7 @@ def main(argv=None) -> None:
         output_root=args.output,
         synthseg=args.synthseg,
         model=args.model,
+        **({"tta": "fast", "overlap": 0.5} if args.fast else {}),
     )
     root = args.output if args.output is not None else default_output_root()
     print(f"wrote {root / manifest['case_id']}", flush=True)

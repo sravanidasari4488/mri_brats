@@ -1,10 +1,17 @@
 """Geometry of load_case: seg centre of mass stays inside the brain, in mm."""
 
+import sys
+from pathlib import Path
+
 import nibabel as nib
 import numpy as np
 from monai.transforms import NormalizeIntensity
 
-from recon.io import MODALITY_SUFFIXES, load_case
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from recon.io import MODALITY_SUFFIXES, load_case  # noqa: E402
 
 
 def _write_case(case_dir):
@@ -88,3 +95,76 @@ def test_seg_com_inside_brain_bbox_and_shapes_match(tmp_path):
         nonzero = image[index][image[index] != 0]
         assert abs(float(nonzero.mean())) < 1e-4
         assert abs(float(nonzero.std()) - 1.0) < 1e-4
+
+
+def test_brats2020_and_processed_names_load_in_the_same_order(tmp_path):
+    shape = (6, 6, 6)
+    layouts = {
+        "processed": ("flair", "t1", "t1c", "t2", "mask"),
+        "BraTS20_Training_002": tuple(
+            f"BraTS20_Training_002_{name}" for name in ("flair", "t1", "t1ce", "t2", "seg")
+        ),
+    }
+    for folder, names in layouts.items():
+        case_dir = tmp_path / folder
+        case_dir.mkdir()
+        for index, name in enumerate(names[:4]):
+            nib.save(nib.Nifti1Image(np.full(shape, index + 1.0, np.float32), np.eye(4)), case_dir / f"{name}.nii.gz")
+        seg = np.zeros(shape, dtype=np.uint8)
+        seg[2:4, 2:4, 2:4] = 4
+        nib.save(nib.Nifti1Image(seg, np.eye(4)), case_dir / f"{names[4]}.nii.gz")
+        loaded = load_case(case_dir, normalize=False)
+        assert [float(loaded["image"][i].mean()) for i in range(4)] == [1.0, 2.0, 3.0, 4.0]
+        assert int((loaded["seg"] == 3).sum()) == 8
+
+
+def test_case_insensitive_names_and_grid_mismatch(tmp_path):
+    from recon.io import input_files_hash, load_case, validate_case_grid
+
+    shape = (6, 6, 6)
+    case_dir = tmp_path / "plain_names"
+    case_dir.mkdir()
+    names = ("FLAIR.nii.gz", "T1.nii.gz", "T1c.nii.gz", "T2.nii.gz")
+    for index, name in enumerate(names):
+        nib.save(nib.Nifti1Image(np.full(shape, index + 1.0, np.float32), np.eye(4)), case_dir / name)
+    loaded = load_case(case_dir, normalize=False)
+    assert [float(loaded["image"][i].mean()) for i in range(4)] == [1.0, 2.0, 3.0, 4.0]
+    first = input_files_hash(case_dir)
+    assert first == input_files_hash(case_dir)
+    nib.save(nib.Nifti1Image(np.full(shape, 9.0, np.float32), np.eye(4)), case_dir / "T2.nii.gz")
+    assert input_files_hash(case_dir) != first
+
+    other = tmp_path / "mismatch"
+    other.mkdir()
+    for name in names:
+        nib.save(nib.Nifti1Image(np.ones(shape, np.float32), np.eye(4)), other / name)
+    nib.save(nib.Nifti1Image(np.ones((5, 6, 6), np.float32), np.eye(4)), other / "T2.nii.gz")
+    try:
+        validate_case_grid(other)
+        raise AssertionError("expected a grid mismatch")
+    except ValueError as exc:
+        message = str(exc)
+        assert "T2" in message
+        assert "FLAIR" in message or "grid" in message.lower()
+
+    affine = np.eye(4, dtype=np.float64)
+    affine[0, 0] = 2.0
+    nib.save(nib.Nifti1Image(np.ones(shape, np.float32), np.eye(4)), other / "T2.nii.gz")
+    nib.save(nib.Nifti1Image(np.ones(shape, np.float32), affine), other / "T1c.nii.gz")
+    try:
+        validate_case_grid(other)
+        raise AssertionError("expected an affine mismatch")
+    except ValueError as exc:
+        message = str(exc)
+        assert "T1 with contrast" in message
+        assert "affine" in message.lower() or "orientation" in message.lower()
+
+
+if __name__ == "__main__":
+    import tempfile
+    from pathlib import Path
+
+    test_seg_com_inside_brain_bbox_and_shapes_match(Path(tempfile.mkdtemp()))
+    test_brats2020_and_processed_names_load_in_the_same_order(Path(tempfile.mkdtemp()))
+    test_case_insensitive_names_and_grid_mismatch(Path(tempfile.mkdtemp()))
+    print("io ok")

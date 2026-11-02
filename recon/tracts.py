@@ -259,13 +259,30 @@ def patient_mni_transforms(t1_path, label, template, *, cache_dir=None, case_id=
     return _store_transforms(cache_case, expected, _register(ants, fixed, template, label))
 
 
+def _stripped_template(ants, template_path):
+    """The MNI T1 without skull when the MNI structural atlas sits beside it.
+
+    BraTS scans are skull-stripped; registering a template with skull pulls
+    the skull into the brain. The atlas labels, closed and filled, are the mask.
+    """
+    template = ants.image_read(str(template_path))
+    structural = Path(template_path).parent / "MNI" / "MNI-maxprob-thr25-1mm.nii.gz"
+    if not structural.is_file():
+        return template
+    labels = np.asarray(nib.load(str(structural)).dataobj)
+    if labels.shape != tuple(template.shape):
+        return template
+    brain = ndimage.binary_fill_holes(ndimage.binary_closing(labels > 0, iterations=4))
+    return template.new_image_like(template.numpy() * brain.astype(np.float32))
+
+
 def _register(ants, fixed, template_path, label):
     tumor = _tumor_wt(label, fixed.shape)
     margin = ndimage.binary_dilation(tumor, structure=CONN, iterations=TUMOR_MARGIN_VOXELS)
     healthy = ((np.asarray(fixed.numpy()) > 0) & ~margin).astype(np.float32)
     reg = ants.registration(
         fixed=fixed,
-        moving=ants.image_read(str(template_path)),
+        moving=_stripped_template(ants, template_path),
         type_of_transform="SyN",
         mask=fixed.new_image_like(healthy),
     )

@@ -2,8 +2,8 @@
 
 SynthSeg and Desikan-Killiany colors are the FreeSurferColorLUT values
 (FreeSurfer ``FreeSurferColorLUT.txt``). Reviewers already know those colors.
-BraTS compartments keep the usual convention: enhancing blue, necrosis red,
-edema yellow. Tract colors are separate, and every tract is marked
+Tumor compartments: necrosis red, enhancing blue, edema gold glass.
+Tract colors are separate, and every tract is marked
 ``atlas-estimated``.
 
 Left and right stay separate meshes (``Left Thalamus``, ``Right Thalamus``).
@@ -21,6 +21,8 @@ from dataclasses import dataclass
 import numpy as np
 
 GROUPS = (
+    "Brain",
+    "Tissue",
     "Cortex",
     "Subcortical",
     "Ventricles",
@@ -35,11 +37,19 @@ ENHANCING = "enhancing"
 CORE = "core"
 BRAIN_MESH = "brain"
 
-_TUMOR_EDEMA_OPACITY = 0.35
+_TUMOR_EDEMA_OPACITY = 0.25
 _TUMOR_OPACITY = 1.0
-_BRAIN_OPACITY = 0.10
+_BRAIN_OPACITY = 0.16
 _TRACT_OPACITY = 0.60
-_ANATOMY_OPACITY = 220 / 255
+_ANATOMY_OPACITY = 0.7
+_CORTEX_OPACITY = 0.35
+_WM_OPACITY = 0.40
+_GLASS_RGB = (159, 184, 214)
+_WM_RGB = (232, 220, 200)
+_VENTRICLE_GLASS_RGB = (95, 198, 232)
+_BLOOD_RGB = (110, 22, 32)
+BLOOD_NOTE = "Not validated — BraTS has no hemorrhage labels; confirmation needs SWI/GRE."
+BLOOD_MESH = "Possible blood products (experimental, T1-hyperintense)"
 
 _SIDE_ORDER = {"left": 0, "right": 1, None: 2}
 
@@ -93,7 +103,7 @@ def _add(
     in_legend: bool = True,
     id_map: dict[int, Structure] | None = None,
 ) -> Structure:
-    if group not in GROUPS and not (group == "Brain" and not in_legend):
+    if group not in GROUPS:
         raise ValueError(f"{full_name} group {group!r} is not one of {GROUPS}")
     if key in BY_KEY:
         raise ValueError(f"Duplicate structure key {key}")
@@ -180,6 +190,7 @@ def _midline(
     rgb: tuple[int, int, int],
     *,
     key: str | None = None,
+    opacity: float = _ANATOMY_OPACITY,
 ) -> None:
     _add(
         label_id=label_id,
@@ -192,7 +203,7 @@ def _midline(
         source="synthseg",
         mesh_name=full_name,
         key=key or full_name.lower().replace(" ", "_"),
-        opacity=_ANATOMY_OPACITY,
+        opacity=opacity,
         id_map=ANATOMY_BY_ID,
     )
 
@@ -200,18 +211,18 @@ def _midline(
 # FreeSurferColorLUT. Cerebral white matter is subcortical tissue in this legend.
 _pair(2, 41, "Cerebral White Matter", "WM", "Subcortical", (245, 245, 245))
 _pair(3, 42, "Cerebral Cortex", "Ctx", "Cortex", (205, 62, 78))
-_pair(4, 43, "Lateral Ventricle", "LV", "Ventricles", (120, 18, 134))
-_pair(5, 44, "Inferior Lateral Ventricle", "ILV", "Ventricles", (196, 58, 250))
+_pair(4, 43, "Lateral Ventricle", "LV", "Ventricles", _VENTRICLE_GLASS_RGB, opacity=_CORTEX_OPACITY)
+_pair(5, 44, "Inferior Lateral Ventricle", "ILV", "Ventricles", _VENTRICLE_GLASS_RGB, opacity=_CORTEX_OPACITY)
 _pair(7, 46, "Cerebellar White Matter", "CbWM", "Brainstem & Cerebellum", (220, 248, 164))
-_pair(8, 47, "Cerebellar Cortex", "CbCtx", "Brainstem & Cerebellum", (230, 148, 34))
+_pair(8, 47, "Cerebellar Cortex", "CbCtx", "Brainstem & Cerebellum", _GLASS_RGB, opacity=_CORTEX_OPACITY)
 _pair(10, 49, "Thalamus", "Thal", "Subcortical", (0, 118, 14))
 _pair(11, 50, "Caudate", "Caud", "Subcortical", (122, 186, 220))
 _pair(12, 51, "Putamen", "Put", "Subcortical", (236, 13, 176))
 # Left pallidum is 12,48,255 and right is 13,48,255 in the LUT.
 _pair(13, 52, "Pallidum", "Pall", "Subcortical", (12, 48, 255), (13, 48, 255))
-_midline(14, "Third Ventricle", "3V", "Ventricles", (204, 182, 142))
-_midline(15, "Fourth Ventricle", "4V", "Ventricles", (42, 204, 164))
-_midline(16, "Brainstem", "BS", "Brainstem & Cerebellum", (119, 159, 176))
+_midline(14, "Third Ventricle", "3V", "Ventricles", _VENTRICLE_GLASS_RGB, opacity=_CORTEX_OPACITY)
+_midline(15, "Fourth Ventricle", "4V", "Ventricles", _VENTRICLE_GLASS_RGB, opacity=_CORTEX_OPACITY)
+_midline(16, "Brainstem", "BS", "Brainstem & Cerebellum", _GLASS_RGB, opacity=_CORTEX_OPACITY)
 _pair(17, 53, "Hippocampus", "Hip", "Subcortical", (220, 216, 20))
 _pair(18, 54, "Amygdala", "Amy", "Subcortical", (103, 255, 255))
 _midline(24, "CSF", "CSF", "Ventricles", (60, 60, 60))
@@ -219,14 +230,14 @@ _pair(26, 58, "Accumbens", "Acc", "Subcortical", (255, 165, 0))
 # Left ventral DC is 145,42,42 and right is 165,42,42 in the LUT.
 _pair(28, 60, "Ventral Diencephalon", "VDC", "Subcortical", (145, 42, 42), (165, 42, 42))
 
-# MNI lobe fallback (ids 101-105). RGB is the FreeSurfer color of the
-# Desikan-Killiany region used as the stand-in for that lobe.
+# MNI lobe fallback (ids 101-105). Glass-tinted lobes: bright enough to
+# read, transparent enough to see the tumor inside.
 _LOBE_COLORS = {
-    "Frontal Lobe": (20, 220, 160),  # ctx superior frontal
-    "Parietal Lobe": (20, 180, 140),  # ctx superior parietal
-    "Temporal Lobe": (160, 100, 50),  # ctx middle temporal
-    "Occipital Lobe": (20, 30, 140),  # ctx lateral occipital
-    "Insular Lobe": (255, 192, 32),  # ctx insula
+    "Frontal Lobe": (236, 118, 142),
+    "Parietal Lobe": (98, 186, 148),
+    "Temporal Lobe": (232, 168, 82),
+    "Occipital Lobe": (122, 118, 214),
+    "Insular Lobe": (196, 112, 186),
 }
 for _lobe_id, _lobe_name, _lobe_short in (
     (101, "Frontal Lobe", "Fro"),
@@ -235,7 +246,15 @@ for _lobe_id, _lobe_name, _lobe_short in (
     (104, "Occipital Lobe", "Occ"),
     (105, "Insular Lobe", "InsL"),
 ):
-    _midline(_lobe_id, _lobe_name, _lobe_short, "Cortex", _LOBE_COLORS[_lobe_name], key=_lobe_name.lower().replace(" ", "_"))
+    _midline(
+        _lobe_id,
+        _lobe_name,
+        _lobe_short,
+        "Cortex",
+        _LOBE_COLORS[_lobe_name],
+        key=_lobe_name.lower().replace(" ", "_"),
+        opacity=_CORTEX_OPACITY,
+    )
 
 # Desikan-Killiany. ctx-lh is 1000+offset and ctx-rh is 2000+offset.
 # FreeSurfer uses the same RGB for both hemispheres of each region.
@@ -294,7 +313,7 @@ EDEMA_STRUCTURE = _add(
     full_name="Edema",
     short_name="ED",
     group="Tumor",
-    rgb=(255, 220, 0),
+    rgb=(245, 197, 66),
     legend_name="Edema",
     side=None,
     source="model",
@@ -308,7 +327,7 @@ NECROSIS_STRUCTURE = _add(
     full_name="Necrosis",
     short_name="NCR",
     group="Tumor",
-    rgb=(220, 40, 40),
+    rgb=(192, 57, 43),
     legend_name="Necrosis",
     side=None,
     source="model",
@@ -322,7 +341,7 @@ ENHANCING_STRUCTURE = _add(
     full_name="Enhancing Tumor",
     short_name="ET",
     group="Tumor",
-    rgb=(60, 120, 255),
+    rgb=(59, 130, 246),
     legend_name="Enhancing Tumor",
     side=None,
     source="model",
@@ -336,7 +355,7 @@ CORE_STRUCTURE = _add(
     full_name="Tumor Core",
     short_name="TC",
     group="Tumor",
-    rgb=(220, 40, 40),
+    rgb=(192, 57, 43),
     legend_name="Tumor Core",
     side=None,
     source="model",
@@ -349,13 +368,13 @@ SHELLS = (EDEMA_STRUCTURE, CORE_STRUCTURE, ENHANCING_STRUCTURE)
 COMPARTMENTS = (EDEMA_STRUCTURE, NECROSIS_STRUCTURE, ENHANCING_STRUCTURE)
 SHELL_NAMES = tuple(spec.mesh_name for spec in SHELLS)
 
-# Outer brain shell. It is not a parcellation class, so it stays out of the legend.
+# Legacy outer shell. The glass viewer uses Left/Right Cortex instead.
 BRAIN = _add(
     label_id=None,
     full_name="Brain",
     short_name="Brain",
     group="Brain",
-    rgb=(180, 180, 180),
+    rgb=_GLASS_RGB,
     legend_name="Brain",
     side=None,
     source="image",
@@ -363,6 +382,71 @@ BRAIN = _add(
     key=BRAIN_MESH,
     opacity=_BRAIN_OPACITY,
     in_legend=False,
+)
+LEFT_CORTEX = _add(
+    label_id=None,
+    full_name="Cortical grey matter (left)",
+    short_name="GM-L",
+    group="Tissue",
+    rgb=_GLASS_RGB,
+    legend_name="Cortical grey matter (left)",
+    side="left",
+    source="synthseg",
+    mesh_name="Left Cortex",
+    key="cortex_l",
+    opacity=_CORTEX_OPACITY,
+)
+RIGHT_CORTEX = _add(
+    label_id=None,
+    full_name="Cortical grey matter (right)",
+    short_name="GM-R",
+    group="Tissue",
+    rgb=_GLASS_RGB,
+    legend_name="Cortical grey matter (right)",
+    side="right",
+    source="synthseg",
+    mesh_name="Right Cortex",
+    key="cortex_r",
+    opacity=_CORTEX_OPACITY,
+)
+WHITE_MATTER = _add(
+    label_id=None,
+    full_name="White matter",
+    short_name="WM",
+    group="Tissue",
+    rgb=_WM_RGB,
+    legend_name="White matter",
+    side=None,
+    source="synthseg",
+    mesh_name="White Matter",
+    key="white_matter",
+    opacity=_WM_OPACITY,
+)
+GREY_MATTER_TOTAL = _add(
+    label_id=None,
+    full_name="Grey matter total",
+    short_name="GM",
+    group="Tissue",
+    rgb=_GLASS_RGB,
+    legend_name="Grey matter total",
+    side=None,
+    source="synthseg",
+    mesh_name="Grey matter total",
+    key="grey_matter_total",
+    opacity=_CORTEX_OPACITY,
+)
+BLOOD_PRODUCTS = _add(
+    label_id=None,
+    full_name=BLOOD_MESH,
+    short_name="T1+",
+    group="Tumor",
+    rgb=_BLOOD_RGB,
+    legend_name=BLOOD_MESH,
+    side=None,
+    source="heuristic",
+    mesh_name=BLOOD_MESH,
+    key="blood_products",
+    opacity=_TUMOR_OPACITY,
 )
 
 # JHU tracts. Each key matches ``recon.tracts.JHU_PROB_VOLUMES``.
@@ -442,8 +526,11 @@ def structures_in_volume(parc) -> list[tuple[Structure, np.ndarray]]:
     return found
 
 
-def legend_entries(structures) -> list[dict]:
-    """One row per left/right pair. Mesh names stay on the row."""
+def legend_entries(structures, volumes=None) -> list[dict]:
+    """One row per left/right pair. Mesh names stay on the row.
+
+    When ``volumes`` maps mesh name to cm³, each row also has ``volume_cm3``.
+    """
     buckets: dict[tuple[str, str], list[Structure]] = {}
     order: list[tuple[str, str]] = []
     for spec in structures:
@@ -462,13 +549,17 @@ def legend_entries(structures) -> list[dict]:
     for group, legend_name in sorted(order, key=_sort_key):
         members = sorted(buckets[(group, legend_name)], key=lambda spec: _SIDE_ORDER[spec.side])
         swatch = next((spec for spec in members if spec.side == "left"), members[0])
-        entries.append(
-            {
-                "name": legend_name,
-                "group": group,
-                "rgb": [int(channel) for channel in swatch.rgb],
-                "source": swatch.source,
-                "meshes": [spec.mesh_name for spec in members],
-            }
-        )
+        row = {
+            "name": legend_name,
+            "group": group,
+            "rgb": [int(channel) for channel in swatch.rgb],
+            "source": swatch.source,
+            "meshes": [spec.mesh_name for spec in members],
+        }
+        if volumes is not None:
+            parts = [volumes.get(spec.mesh_name) for spec in members]
+            parts = [float(value) for value in parts if value is not None]
+            if parts:
+                row["volume_cm3"] = float(sum(parts))
+        entries.append(row)
     return entries

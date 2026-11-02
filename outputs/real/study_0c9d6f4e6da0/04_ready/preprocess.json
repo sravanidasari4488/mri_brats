@@ -1,0 +1,80 @@
+{
+  "study_id": "study_0c9d6f4e6da0",
+  "tier": "FULL",
+  "reference": {
+    "role": "t1",
+    "reason": "3D T1 (thinnest)",
+    "series_description": "eT1W_3D_TFE_ref",
+    "acquisition": "3D",
+    "slice_thickness_mm": 1.1,
+    "n_slices": 265,
+    "orientation": "sagittal"
+  },
+  "series_chosen": {
+    "flair": {
+      "series_description": "eT2W_FLAIR SPIR CLEAR",
+      "acquisition": "2D",
+      "slice_thickness_mm": 5.0,
+      "n_slices": 25,
+      "orientation": "axial"
+    },
+    "t1": {
+      "series_description": "eT1W_3D_TFE_ref",
+      "acquisition": "3D",
+      "slice_thickness_mm": 1.1,
+      "n_slices": 265,
+      "orientation": "sagittal"
+    },
+    "t1c": {
+      "series_description": "T1W_FFE CE",
+      "acquisition": "2D",
+      "slice_thickness_mm": 5.0,
+      "n_slices": 30,
+      "orientation": "coronal"
+    },
+    "t2": {
+      "series_description": "T2W_TSE",
+      "acquisition": "2D",
+      "slice_thickness_mm": 5.0,
+      "n_slices": 30,
+      "orientation": "coronal"
+    }
+  },
+  "original_thickness_mm": {
+    "flair": 5.0,
+    "t1": 1.1,
+    "t1c": 5.0,
+    "t2": 5.0
+  },
+  "registration": {
+    "transform": "rigid",
+    "metric": "mattes_mutual_information",
+    "interpolator": "bSpline",
+    "spacing_mm": [
+      1.0,
+      1.0,
+      1.0
+    ],
+    "orientation": "RAS",
+    "values": {
+      "t1": null,
+      "flair": -0.3161703736147598,
+      "t1c": -0.4337439222479812,
+      "t2": -0.3353642038137444
+    }
+  },
+  "conversion": {
+    "flair": "dcm2niix",
+    "t1": "dcm2niix",
+    "t1c": "dcm2niix",
+    "t2": "dcm2niix"
+  },
+  "n4": true,
+  "skull_strip": {
+    "method": "hd-bet",
+    "device": "cpu",
+    "mode": "fast",
+    "tta": 0
+  },
+  "normalization": "nonzero_zscore_channelwise"
+}

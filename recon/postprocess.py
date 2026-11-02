@@ -125,13 +125,40 @@ class PostConfig:
         return config_path
 
 
+def foreground(volume) -> np.ndarray:
+    """Brain voxels, excluding padding.
+
+    Raw BraTS padding is 0. Some processed copies z-score only tissue and leave
+    that padding at 0, so tissue is ``!= 0``. Others fill the field of view with
+    small negatives; there ``!= 0`` is the whole box and tissue is ``> 0``.
+    """
+    volume = np.asarray(volume)
+    positive = volume > 0
+    nonzero = volume != 0
+    if float(np.mean(nonzero)) > 0.5:
+        return positive
+    return nonzero
+
+
 def brain_mask_from_image(image_np, config: PostConfig | None = None):
-    """BraTS is skull-stripped: brain = any modality nonzero. image_np: (C, H, W, D)."""
+    """BraTS is skull-stripped: brain = any modality above its background. image_np: (C, H, W, D).
+
+    The mask is padded before hole-filling so a brain that touches the volume
+    border does not fill the whole box. Only the largest 26-connected component
+    is kept.
+    """
     if config is None:
         config = PostConfig.from_yaml()
-    mask = (np.abs(image_np) > 0).any(0)
-    mask = ndimage.binary_closing(mask, CONN, iterations=config.brain_closing_iterations)
-    return ndimage.binary_fill_holes(mask)
+    mask = np.stack([foreground(channel) for channel in np.asarray(image_np)]).any(0)
+    pad = max(int(config.brain_closing_iterations), 0) + 1
+    padded = np.pad(mask, pad)
+    padded = ndimage.binary_closing(padded, CONN, iterations=config.brain_closing_iterations)
+    filled = ndimage.binary_fill_holes(padded)[pad:-pad, pad:-pad, pad:-pad]
+    labeled, count = ndimage.label(filled, structure=CONN)
+    if count <= 1:
+        return filled
+    sizes = ndimage.sum(filled, labeled, index=np.arange(1, count + 1))
+    return labeled == (int(np.argmax(sizes)) + 1)
 
 
 def remove_small_components(mask, min_vox):
